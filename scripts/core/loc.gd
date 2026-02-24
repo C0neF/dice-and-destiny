@@ -76,6 +76,11 @@ var strings: Dictionary = {
 		"enemy_goblin": "哥布林",
 		"enemy_ghost": "幽灵",
 		"enemy_demon": "恶魔领主",
+		"enemy_mushroom": "毒蘑菇",
+		"enemy_mimic": "宝箱怪",
+		"enemy_fire_elemental": "火元素",
+		"enemy_dark_knight": "暗黑骑士",
+		"enemy_ice_golem": "冰魔像",
 		# Dice names
 		"dice_normal": "普通骰",
 		"dice_fire": "火焰骰",
@@ -169,10 +174,42 @@ var strings: Dictionary = {
 		"rest_upgraded": "%s 已升级! (+2 基础值)",
 		# Event UI
 		"event_title": "❓ 神秘事件",
-		"event_blessing": "✨ 神殿祝福! 最大生命 +5",
-		"event_curse": "💀 陷阱触发! 受到 5 点伤害",
-		"event_gift": "🎲 发现一颗遗落的骰子!",
+		"event_leave": "离开",
 		"event_continue": "继续",
+		# Fountain
+		"event_fountain_title": "⛲ 神秘泉水",
+		"event_fountain_desc": "一汪闪烁的泉水。喝下去可能恢复体力...也可能有毒。",
+		"event_fountain_drink": "🥤 喝一口",
+		"event_fountain_good": "✨ 甘甜的泉水! 恢复 %d 点生命",
+		"event_fountain_bad": "🤢 有毒! 受到 %d 点伤害",
+		# Altar
+		"event_altar_title": "🗿 远古祭坛",
+		"event_altar_desc": "献祭一张卡牌，另一张将获得双倍强化。",
+		"event_altar_step1": "选择要献祭的卡牌:",
+		"event_altar_step2": "🗿 选择要强化的卡牌 (+4基础值)",
+		"event_altar_no_cards": "你的牌组太小了，无法献祭。",
+		# Cursed Chest
+		"event_cursed_title": "💀 诅咒宝箱",
+		"event_cursed_desc": "承受 %d 点伤害，获得一张强化过的 %s",
+		"event_cursed_open": "🔓 打开",
+		# Training
+		"event_training_title": "🎯 训练场",
+		"event_training_desc": "训练使你更强: 最大能量+1，随机一张牌升级。",
+		"event_training_train": "⚔️ 训练",
+		# Fortune
+		"event_fortune_title": "🔮 占卜师",
+		"event_fortune_desc": "命运的馈赠——选择你的奖赏。",
+		"event_fortune_dice": "🎲 获得 %s",
+		"event_fortune_gold": "💰 获得 %d 金币",
+		# Forge
+		"event_forge_title": "🔨 废弃锻造炉",
+		"event_forge_desc": "将一张卡牌投入炉火，它将化为另一张未知的卡牌。",
+		# Wanderer
+		"event_wanderer_title": "👻 游荡之灵",
+		"event_wanderer_desc": "一缕幽灵向你伸出手，似乎想要给你什么...",
+		"event_wanderer_hp": "❤️ 最大生命+8",
+		"event_wanderer_relic": "🏺 获得 %s",
+		"event_wanderer_gold": "💰 获得 40 金币",
 		# Relic choice UI
 		"relic_choice_title": "🏺 选择一件遗物",
 		"relic_choice_skip": "放弃",
@@ -185,6 +222,42 @@ var strings: Dictionary = {
 		# Card removal
 		"remove_card_title": "🗑️ 选择要删除的卡牌",
 		"remove_card_confirm": "删除 %s?",
+		# Continue / Meta
+		"continue_run": "▶ 继续冒险",
+		"meta_stats": "共 %d 次冒险 | 最远到达第 %d 层",
+		# Deck viewer
+		"deck_viewer_btn": "📋 牌组",
+		"deck_viewer_title": "📋 牌组与装备",
+		"deck_tab_cards": "🃏 卡牌",
+		"deck_tab_relics": "🏺 遗物",
+		"deck_tab_stats": "📊 数据",
+		"deck_total_cards": "共 %d 张牌",
+		"deck_total_relics": "共 %d 件遗物",
+		"deck_no_relics": "还没有遗物",
+		"deck_dice_pool": "🎲 骰子池 (%d 颗)",
+		# Run stats
+		"stat_floor": "层数",
+		"stat_time": "用时",
+		"stat_enemies_killed": "击杀敌人",
+		"stat_cards_played": "出牌次数",
+		"stat_damage_dealt": "造成伤害",
+		"stat_damage_taken": "承受伤害",
+		"stat_healed": "恢复生命",
+		"stat_gold_earned": "获得金币",
+		"stat_dice_rolled": "掷骰次数",
+		"stat_rooms_cleared": "清理房间",
+		"stat_relics_found": "获得遗物",
+		"stat_highest_combo": "最高连击",
+		"stat_cards_upgraded": "升级卡牌",
+		"victory_summary": "⚔️ 通关统计",
+		# Boss phases
+		"boss_phase2": "🔥 恶魔领主进入狂暴! 攻防大幅提升!",
+		"boss_phase3": "💀 恶魔领主陷入绝望! 释放末日之力!",
+		# Pause menu
+		"pause_title": "⏸ 暂停",
+		"pause_resume": "▶ 继续游戏",
+		"pause_restart": "🔄 重新开始",
+		"pause_quit": "🚪 退出到主菜单",
 	},
 	"en": {
 		"title": "DICE & DESTINY",
@@ -258,6 +331,11 @@ var strings: Dictionary = {
 		"enemy_goblin": "Goblin",
 		"enemy_ghost": "Ghost",
 		"enemy_demon": "Demon Lord",
+		"enemy_mushroom": "Poison Mushroom",
+		"enemy_mimic": "Mimic",
+		"enemy_fire_elemental": "Fire Elemental",
+		"enemy_dark_knight": "Dark Knight",
+		"enemy_ice_golem": "Ice Golem",
 		# Dice names
 		"dice_normal": "Normal Die",
 		"dice_fire": "Fire Die",
@@ -351,10 +429,42 @@ var strings: Dictionary = {
 		"rest_upgraded": "%s upgraded! (+2 base value)",
 		# Event UI
 		"event_title": "❓ Mysterious Event",
-		"event_blessing": "✨ Temple Blessing! Max HP +5",
-		"event_curse": "💀 Trap triggered! Took 5 damage",
-		"event_gift": "🎲 Found a lost die!",
+		"event_leave": "Leave",
 		"event_continue": "Continue",
+		# Fountain
+		"event_fountain_title": "⛲ Mysterious Fountain",
+		"event_fountain_desc": "A shimmering pool of water. Drink it? It might heal you... or not.",
+		"event_fountain_drink": "🥤 Drink",
+		"event_fountain_good": "✨ Refreshing! Healed %d HP",
+		"event_fountain_bad": "🤢 Poisoned! Took %d damage",
+		# Altar
+		"event_altar_title": "🗿 Ancient Altar",
+		"event_altar_desc": "Sacrifice a card to upgrade another one twice.",
+		"event_altar_step1": "Choose a card to sacrifice:",
+		"event_altar_step2": "🗿 Choose a card to empower (+4 base value)",
+		"event_altar_no_cards": "Your deck is too small to sacrifice.",
+		# Cursed Chest
+		"event_cursed_title": "💀 Cursed Chest",
+		"event_cursed_desc": "Take %d damage to receive an upgraded %s",
+		"event_cursed_open": "🔓 Open It",
+		# Training
+		"event_training_title": "🎯 Training Grounds",
+		"event_training_desc": "Training makes you stronger: +1 max energy and a random card upgrade.",
+		"event_training_train": "⚔️ Train",
+		# Fortune
+		"event_fortune_title": "🔮 Fortune Teller",
+		"event_fortune_desc": "A gift from fate — choose your reward.",
+		"event_fortune_dice": "🎲 Get %s",
+		"event_fortune_gold": "💰 Get %d gold",
+		# Forge
+		"event_forge_title": "🔨 Abandoned Forge",
+		"event_forge_desc": "Throw a card into the flames. It will become something else entirely.",
+		# Wanderer
+		"event_wanderer_title": "👻 Wandering Spirit",
+		"event_wanderer_desc": "A ghostly figure reaches out to you, offering a gift...",
+		"event_wanderer_hp": "❤️ +8 Max HP",
+		"event_wanderer_relic": "🏺 Get %s",
+		"event_wanderer_gold": "💰 Get 40 gold",
 		# Relic choice UI
 		"relic_choice_title": "🏺 Choose a Relic",
 		"relic_choice_skip": "Skip",
@@ -367,6 +477,42 @@ var strings: Dictionary = {
 		# Card removal
 		"remove_card_title": "🗑️ Choose a Card to Remove",
 		"remove_card_confirm": "Remove %s?",
+		# Continue / Meta
+		"continue_run": "▶ Continue Run",
+		"meta_stats": "%d runs | Best: Floor %d",
+		# Deck viewer
+		"deck_viewer_btn": "📋 Deck",
+		"deck_viewer_title": "📋 Deck & Equipment",
+		"deck_tab_cards": "🃏 Cards",
+		"deck_tab_relics": "🏺 Relics",
+		"deck_tab_stats": "📊 Stats",
+		"deck_total_cards": "%d cards in deck",
+		"deck_total_relics": "%d relics",
+		"deck_no_relics": "No relics yet",
+		"deck_dice_pool": "🎲 Dice Pool (%d)",
+		# Run stats
+		"stat_floor": "Floor",
+		"stat_time": "Time",
+		"stat_enemies_killed": "Enemies Killed",
+		"stat_cards_played": "Cards Played",
+		"stat_damage_dealt": "Damage Dealt",
+		"stat_damage_taken": "Damage Taken",
+		"stat_healed": "HP Healed",
+		"stat_gold_earned": "Gold Earned",
+		"stat_dice_rolled": "Dice Rolled",
+		"stat_rooms_cleared": "Rooms Cleared",
+		"stat_relics_found": "Relics Found",
+		"stat_highest_combo": "Highest Combo",
+		"stat_cards_upgraded": "Cards Upgraded",
+		"victory_summary": "⚔️ Run Complete",
+		# Boss phases
+		"boss_phase2": "🔥 The Demon Lord enters a frenzy! Attack & defense surges!",
+		"boss_phase3": "💀 The Demon Lord is desperate! Unleashing doomsday power!",
+		# Pause menu
+		"pause_title": "⏸ Paused",
+		"pause_resume": "▶ Resume",
+		"pause_restart": "🔄 Restart",
+		"pause_quit": "🚪 Quit to Menu",
 	}
 }
 

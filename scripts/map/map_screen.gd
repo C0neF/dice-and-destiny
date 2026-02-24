@@ -21,11 +21,26 @@ func _ready():
 	back_button.theme = ThemeGen.create_game_theme()
 	back_button.text = Loc.t("menu")
 	back_button.pressed.connect(_on_back)
+	
+	# Deck viewer button
+	var deck_btn = Button.new()
+	deck_btn.name = "DeckButton"
+	deck_btn.text = Loc.t("deck_viewer_btn")
+	deck_btn.add_theme_font_size_override("font_size", 14)
+	deck_btn.custom_minimum_size = Vector2(80, 30)
+	deck_btn.position = back_button.position + Vector2(back_button.size.x + 10, 0)
+	deck_btn.pressed.connect(_show_deck_viewer)
+	$UI.add_child(deck_btn)
+	
 	var legend = get_node_or_null("UI/Legend")
 	if legend:
 		legend.text = Loc.t("legend")
 	generate_map()
 	VFX.fade_in(0.3)
+	
+	# Auto-save when entering map
+	SaveManager.save_run()
+	SaveManager.save_meta()
 
 func generate_map():
 	floor_data = DungeonGenerator.generate_floor(GameState.current_floor, GameState.map_seed)
@@ -215,7 +230,10 @@ func _create_popup(title_text: String, width: float = 520.0, height: float = 420
 func _close_popup_and_finish(room):
 	_clear_popup()
 	room.cleared = true
+	GameState.stats["rooms_cleared"] = GameState.stats.get("rooms_cleared", 0) + 1
 	_draw_map()
+	# Auto-save after each room
+	SaveManager.save_run()
 
 func _card_name(card_id: String) -> String:
 	var key = "card_" + card_id
@@ -247,6 +265,7 @@ func _enter_battle(room):
 	
 	battle_scene.battle_won.connect(func(rewards):
 		room.cleared = true
+		GameState.stats["rooms_cleared"] = GameState.stats.get("rooms_cleared", 0) + 1
 		GameState.add_gold(rewards.gold)
 		for card_id in rewards.cards:
 			GameState.add_card_to_deck(card_id)
@@ -949,57 +968,706 @@ func _show_card_upgrade(room):
 # ============================================================
 
 func _trigger_event(room):
-	var vbox = _create_popup(Loc.t("event_title"), 400, 280)
+	# Pick a random event type
+	var events = [
+		"fountain", "altar", "cursed_chest", "training",
+		"fortune", "forge", "wanderer",
+	]
+	var event_id = events[randi() % events.size()]
+	match event_id:
+		"fountain":   _event_fountain(room)
+		"altar":      _event_altar(room)
+		"cursed_chest": _event_cursed_chest(room)
+		"training":   _event_training(room)
+		"fortune":    _event_fortune(room)
+		"forge":      _event_forge(room)
+		"wanderer":   _event_wanderer(room)
+
+## ---- Mysterious Fountain: drink (random heal or damage) or leave ----
+func _event_fountain(room):
+	var vbox = _create_popup(Loc.t("event_fountain_title"), 440, 320)
 	
-	var roll = randf()
-	var event_text: String
-	var event_color: Color
+	var icon = Label.new()
+	icon.text = "⛲"
+	icon.add_theme_font_size_override("font_size", 36)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(icon)
 	
-	if roll < 0.33:
-		# Blessing
-		GameState.player_max_hp += 5
-		GameState.heal(5)
-		event_text = Loc.t("event_blessing")
-		event_color = Color(0.4, 0.9, 0.5)
-	elif roll < 0.66:
-		# Curse
-		GameState.take_damage(5)
-		event_text = Loc.t("event_curse")
-		event_color = Color(0.9, 0.3, 0.25)
-	else:
-		# Gift
-		GameState.add_dice("normal")
-		event_text = Loc.t("event_gift")
-		event_color = Color(0.5, 0.8, 1)
+	var desc = Label.new()
+	desc.text = Loc.t("event_fountain_desc")
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc)
 	
-	var event_icon = Label.new()
-	event_icon.text = "🔮"
-	event_icon.add_theme_font_size_override("font_size", 36)
-	event_icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(event_icon)
+	var result_lbl = Label.new()
+	result_lbl.add_theme_font_size_override("font_size", 15)
+	result_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_lbl.visible = false
+	vbox.add_child(result_lbl)
 	
-	var desc_lbl = Label.new()
-	desc_lbl.text = event_text
-	desc_lbl.add_theme_font_size_override("font_size", 16)
-	desc_lbl.add_theme_color_override("font_color", event_color)
-	desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(desc_lbl)
+	var btn_row = HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_theme_constant_override("separation", 16)
+	vbox.add_child(btn_row)
 	
-	var spacer = Control.new()
-	spacer.custom_minimum_size = Vector2(0, 12)
-	vbox.add_child(spacer)
+	var drink_btn = Button.new()
+	drink_btn.text = Loc.t("event_fountain_drink")
+	drink_btn.add_theme_font_size_override("font_size", 14)
+	drink_btn.custom_minimum_size = Vector2(140, 36)
+	btn_row.add_child(drink_btn)
 	
-	var continue_btn = Button.new()
-	continue_btn.text = Loc.t("event_continue")
-	continue_btn.add_theme_font_size_override("font_size", 15)
-	continue_btn.custom_minimum_size = Vector2(160, 40)
-	continue_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	vbox.add_child(continue_btn)
+	var leave_btn = Button.new()
+	leave_btn.text = Loc.t("event_leave")
+	leave_btn.add_theme_font_size_override("font_size", 14)
+	leave_btn.custom_minimum_size = Vector2(140, 36)
+	btn_row.add_child(leave_btn)
 	
-	continue_btn.pressed.connect(func():
+	var done_btn = Button.new()
+	done_btn.text = Loc.t("event_continue")
+	done_btn.add_theme_font_size_override("font_size", 14)
+	done_btn.custom_minimum_size = Vector2(140, 36)
+	done_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	done_btn.visible = false
+	vbox.add_child(done_btn)
+	
+	drink_btn.pressed.connect(func():
+		btn_row.visible = false
+		result_lbl.visible = true
+		done_btn.visible = true
+		if randf() < 0.6:
+			var heal_amt = GameState.player_max_hp * 3 / 10
+			GameState.heal(heal_amt)
+			result_lbl.text = Loc.tf("event_fountain_good", [heal_amt])
+			result_lbl.add_theme_color_override("font_color", Color(0.3, 0.9, 0.4))
+		else:
+			var dmg = 8
+			GameState.take_damage(dmg)
+			result_lbl.text = Loc.tf("event_fountain_bad", [dmg])
+			result_lbl.add_theme_color_override("font_color", Color(0.9, 0.3, 0.2))
+	)
+	leave_btn.pressed.connect(func(): _close_popup_and_finish(room))
+	done_btn.pressed.connect(func(): _close_popup_and_finish(room))
+
+## ---- Ancient Altar: sacrifice a card to upgrade another twice ----
+func _event_altar(room):
+	var vbox = _create_popup(Loc.t("event_altar_title"), 480, 360)
+	
+	var icon = Label.new()
+	icon.text = "🗿"
+	icon.add_theme_font_size_override("font_size", 36)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(icon)
+	
+	var desc = Label.new()
+	desc.text = Loc.t("event_altar_desc")
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.8, 0.7, 1.0))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc)
+	
+	var all_cards = GameState.get_all_deck_card_ids()
+	if all_cards.size() < 2:
+		desc.text = Loc.t("event_altar_no_cards")
+		var leave = Button.new()
+		leave.text = Loc.t("event_leave")
+		leave.add_theme_font_size_override("font_size", 14)
+		leave.custom_minimum_size = Vector2(140, 36)
+		leave.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		vbox.add_child(leave)
+		leave.pressed.connect(func(): _close_popup_and_finish(room))
+		return
+	
+	var step_lbl = Label.new()
+	step_lbl.text = Loc.t("event_altar_step1")
+	step_lbl.add_theme_font_size_override("font_size", 13)
+	step_lbl.add_theme_color_override("font_color", Color(0.9, 0.5, 0.3))
+	step_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(step_lbl)
+	
+	var grid = GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	vbox.add_child(grid)
+	
+	var seen: Dictionary = {}
+	for card_id in all_cards:
+		if seen.has(card_id):
+			continue
+		seen[card_id] = true
+		var btn = Button.new()
+		btn.text = _card_name(card_id)
+		btn.add_theme_font_size_override("font_size", 11)
+		btn.custom_minimum_size = Vector2(95, 30)
+		grid.add_child(btn)
+		
+		btn.pressed.connect(func():
+			# Sacrifice this card
+			GameState.remove_card_from_deck(card_id)
+			# Now pick a card to upgrade twice
+			_clear_popup()
+			_event_altar_step2(room)
+		)
+	
+	var leave = Button.new()
+	leave.text = Loc.t("event_leave")
+	leave.add_theme_font_size_override("font_size", 13)
+	leave.custom_minimum_size = Vector2(120, 32)
+	leave.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	vbox.add_child(leave)
+	leave.pressed.connect(func(): _close_popup_and_finish(room))
+
+func _event_altar_step2(room):
+	var vbox = _create_popup(Loc.t("event_altar_step2"), 480, 360)
+	
+	var all_cards = GameState.get_all_deck_card_ids()
+	var grid = GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	vbox.add_child(grid)
+	
+	var seen: Dictionary = {}
+	for card_id in all_cards:
+		if seen.has(card_id):
+			continue
+		seen[card_id] = true
+		var lvl = GameState.get_card_upgrade_level(card_id)
+		var btn = Button.new()
+		btn.text = "%s +%d→+%d" % [_card_name(card_id), lvl * 2, (lvl + 2) * 2]
+		btn.add_theme_font_size_override("font_size", 11)
+		btn.custom_minimum_size = Vector2(110, 30)
+		grid.add_child(btn)
+		
+		btn.pressed.connect(func():
+			GameState.upgrade_card(card_id)
+			GameState.upgrade_card(card_id)
+			_close_popup_and_finish(room)
+		)
+
+## ---- Cursed Chest: take damage for a powerful card, or leave ----
+func _event_cursed_chest(room):
+	var vbox = _create_popup(Loc.t("event_cursed_title"), 460, 340)
+	
+	var icon = Label.new()
+	icon.text = "💀"
+	icon.add_theme_font_size_override("font_size", 36)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(icon)
+	
+	# Pick a strong card as reward
+	var strong_cards = ["heavy_strike", "fireball", "fortress", "vampiric_strike",
+		"chain_lightning", "inferno", "summon_familiar", "double_or_nothing"]
+	var reward_card = strong_cards[randi() % strong_cards.size()]
+	var damage_cost = 10 + randi() % 6
+	
+	var desc = Label.new()
+	desc.text = Loc.tf("event_cursed_desc", [damage_cost, _card_name(reward_card)])
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.85, 0.6, 0.9))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc)
+	
+	var btn_row = HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_theme_constant_override("separation", 16)
+	vbox.add_child(btn_row)
+	
+	var open_btn = Button.new()
+	open_btn.text = Loc.t("event_cursed_open")
+	open_btn.add_theme_font_size_override("font_size", 14)
+	open_btn.custom_minimum_size = Vector2(140, 36)
+	btn_row.add_child(open_btn)
+	
+	var leave_btn = Button.new()
+	leave_btn.text = Loc.t("event_leave")
+	leave_btn.add_theme_font_size_override("font_size", 14)
+	leave_btn.custom_minimum_size = Vector2(140, 36)
+	btn_row.add_child(leave_btn)
+	
+	open_btn.pressed.connect(func():
+		GameState.take_damage(damage_cost)
+		GameState.add_card_to_deck(reward_card)
+		GameState.upgrade_card(reward_card)  # Pre-upgraded!
 		_close_popup_and_finish(room)
 	)
+	leave_btn.pressed.connect(func(): _close_popup_and_finish(room))
+
+## ---- Training Dummy: free upgrade but next battle is harder ----
+func _event_training(room):
+	var vbox = _create_popup(Loc.t("event_training_title"), 440, 300)
+	
+	var icon = Label.new()
+	icon.text = "🎯"
+	icon.add_theme_font_size_override("font_size", 36)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(icon)
+	
+	var desc = Label.new()
+	desc.text = Loc.t("event_training_desc")
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.9, 0.85, 0.6))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc)
+	
+	var btn_row = HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_theme_constant_override("separation", 16)
+	vbox.add_child(btn_row)
+	
+	var train_btn = Button.new()
+	train_btn.text = Loc.t("event_training_train")
+	train_btn.add_theme_font_size_override("font_size", 14)
+	train_btn.custom_minimum_size = Vector2(140, 36)
+	btn_row.add_child(train_btn)
+	
+	var leave_btn = Button.new()
+	leave_btn.text = Loc.t("event_leave")
+	leave_btn.add_theme_font_size_override("font_size", 14)
+	leave_btn.custom_minimum_size = Vector2(140, 36)
+	btn_row.add_child(leave_btn)
+	
+	train_btn.pressed.connect(func():
+		# Free upgrade + max energy +1
+		GameState.player_max_energy += 1
+		GameState.player_energy += 1
+		var all_c = GameState.get_all_deck_card_ids()
+		if all_c.size() > 0:
+			GameState.upgrade_card(all_c[randi() % all_c.size()])
+		_close_popup_and_finish(room)
+	)
+	leave_btn.pressed.connect(func(): _close_popup_and_finish(room))
+
+## ---- Fortune Teller: get a free special die OR gold ----
+func _event_fortune(room):
+	var vbox = _create_popup(Loc.t("event_fortune_title"), 440, 320)
+	
+	var icon = Label.new()
+	icon.text = "🔮"
+	icon.add_theme_font_size_override("font_size", 36)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(icon)
+	
+	var desc = Label.new()
+	desc.text = Loc.t("event_fortune_desc")
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.7, 0.6, 1.0))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc)
+	
+	var btn_row = HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_theme_constant_override("separation", 12)
+	vbox.add_child(btn_row)
+	
+	var dice_types = ["fire", "ice", "poison"]
+	var offered_dice = dice_types[randi() % dice_types.size()]
+	
+	var dice_btn = Button.new()
+	dice_btn.text = Loc.tf("event_fortune_dice", [_dice_name(offered_dice)])
+	dice_btn.add_theme_font_size_override("font_size", 13)
+	dice_btn.custom_minimum_size = Vector2(155, 36)
+	btn_row.add_child(dice_btn)
+	
+	var gold_btn = Button.new()
+	var gold_amount = 25 + randi() % 20
+	gold_btn.text = Loc.tf("event_fortune_gold", [gold_amount])
+	gold_btn.add_theme_font_size_override("font_size", 13)
+	gold_btn.custom_minimum_size = Vector2(155, 36)
+	btn_row.add_child(gold_btn)
+	
+	dice_btn.pressed.connect(func():
+		GameState.add_dice(offered_dice)
+		_close_popup_and_finish(room)
+	)
+	gold_btn.pressed.connect(func():
+		GameState.add_gold(gold_amount)
+		_close_popup_and_finish(room)
+	)
+
+## ---- Abandoned Forge: transform a card into a random different one ----
+func _event_forge(room):
+	var vbox = _create_popup(Loc.t("event_forge_title"), 480, 380)
+	
+	var icon = Label.new()
+	icon.text = "🔨"
+	icon.add_theme_font_size_override("font_size", 36)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(icon)
+	
+	var desc = Label.new()
+	desc.text = Loc.t("event_forge_desc")
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(1, 0.7, 0.4))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc)
+	
+	var all_cards = GameState.get_all_deck_card_ids()
+	if all_cards.is_empty():
+		var leave = Button.new()
+		leave.text = Loc.t("event_leave")
+		leave.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		vbox.add_child(leave)
+		leave.pressed.connect(func(): _close_popup_and_finish(room))
+		return
+	
+	var grid = GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	vbox.add_child(grid)
+	
+	var seen: Dictionary = {}
+	for card_id in all_cards:
+		if seen.has(card_id):
+			continue
+		seen[card_id] = true
+		var btn = Button.new()
+		btn.text = _card_name(card_id) + " → ?"
+		btn.add_theme_font_size_override("font_size", 11)
+		btn.custom_minimum_size = Vector2(100, 30)
+		grid.add_child(btn)
+		
+		btn.pressed.connect(func():
+			GameState.remove_card_from_deck(card_id)
+			# Give a random different card
+			var pool = GameData.CARDS.keys().filter(func(k): return k != card_id)
+			if pool.size() > 0:
+				var new_card = pool[randi() % pool.size()]
+				GameState.add_card_to_deck(new_card)
+			_close_popup_and_finish(room)
+		)
+	
+	var leave = Button.new()
+	leave.text = Loc.t("event_leave")
+	leave.add_theme_font_size_override("font_size", 13)
+	leave.custom_minimum_size = Vector2(120, 32)
+	leave.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	vbox.add_child(leave)
+	leave.pressed.connect(func(): _close_popup_and_finish(room))
+
+## ---- Wandering Spirit: gain max HP or gain a relic ----
+func _event_wanderer(room):
+	var vbox = _create_popup(Loc.t("event_wanderer_title"), 440, 320)
+	
+	var icon = Label.new()
+	icon.text = "👻"
+	icon.add_theme_font_size_override("font_size", 36)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(icon)
+	
+	var desc = Label.new()
+	desc.text = Loc.t("event_wanderer_desc")
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.6, 0.85, 0.9))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc)
+	
+	var btn_row = HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_theme_constant_override("separation", 12)
+	vbox.add_child(btn_row)
+	
+	# Option A: +8 max HP
+	var hp_btn = Button.new()
+	hp_btn.text = Loc.t("event_wanderer_hp")
+	hp_btn.add_theme_font_size_override("font_size", 13)
+	hp_btn.custom_minimum_size = Vector2(150, 36)
+	btn_row.add_child(hp_btn)
+	
+	# Option B: random relic (if available)
+	var available_relics = RelicData.pick_random(1, GameState.relics)
+	var relic_btn = Button.new()
+	if available_relics.size() > 0:
+		var rdef = RelicData.RELICS.get(available_relics[0])
+		relic_btn.text = Loc.tf("event_wanderer_relic", [Loc.t(rdef.name_key)])
+	else:
+		relic_btn.text = Loc.t("event_wanderer_gold")
+	relic_btn.add_theme_font_size_override("font_size", 13)
+	relic_btn.custom_minimum_size = Vector2(150, 36)
+	btn_row.add_child(relic_btn)
+	
+	hp_btn.pressed.connect(func():
+		GameState.player_max_hp += 8
+		GameState.heal(8)
+		_close_popup_and_finish(room)
+	)
+	relic_btn.pressed.connect(func():
+		if available_relics.size() > 0:
+			GameState.add_relic(available_relics[0])
+		else:
+			GameState.add_gold(40)
+		_close_popup_and_finish(room)
+	)
+
+# ============================================================
+#  DECK / RELIC VIEWER
+# ============================================================
+
+func _show_deck_viewer():
+	var vbox = _create_popup(Loc.t("deck_viewer_title"), 600, 480)
+	
+	# Tab buttons
+	var tab_row = HBoxContainer.new()
+	tab_row.add_theme_constant_override("separation", 12)
+	tab_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(tab_row)
+	
+	var cards_tab_btn = Button.new()
+	cards_tab_btn.text = Loc.t("deck_tab_cards")
+	cards_tab_btn.add_theme_font_size_override("font_size", 14)
+	cards_tab_btn.custom_minimum_size = Vector2(100, 30)
+	tab_row.add_child(cards_tab_btn)
+	
+	var relics_tab_btn = Button.new()
+	relics_tab_btn.text = Loc.t("deck_tab_relics")
+	relics_tab_btn.add_theme_font_size_override("font_size", 14)
+	relics_tab_btn.custom_minimum_size = Vector2(100, 30)
+	tab_row.add_child(relics_tab_btn)
+	
+	var stats_tab_btn = Button.new()
+	stats_tab_btn.text = Loc.t("deck_tab_stats")
+	stats_tab_btn.add_theme_font_size_override("font_size", 14)
+	stats_tab_btn.custom_minimum_size = Vector2(100, 30)
+	tab_row.add_child(stats_tab_btn)
+	
+	# Content area
+	var content = ScrollContainer.new()
+	content.custom_minimum_size = Vector2(540, 300)
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(content)
+	
+	var content_inner = VBoxContainer.new()
+	content_inner.name = "ContentInner"
+	content_inner.add_theme_constant_override("separation", 4)
+	content_inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(content_inner)
+	
+	# Default: show cards
+	_deck_viewer_show_cards(content_inner)
+	cards_tab_btn.disabled = true
+	
+	cards_tab_btn.pressed.connect(func():
+		_deck_viewer_show_cards(content_inner)
+		cards_tab_btn.disabled = true
+		relics_tab_btn.disabled = false
+		stats_tab_btn.disabled = false
+	)
+	relics_tab_btn.pressed.connect(func():
+		_deck_viewer_show_relics(content_inner)
+		cards_tab_btn.disabled = false
+		relics_tab_btn.disabled = true
+		stats_tab_btn.disabled = false
+	)
+	stats_tab_btn.pressed.connect(func():
+		_deck_viewer_show_stats(content_inner)
+		cards_tab_btn.disabled = false
+		relics_tab_btn.disabled = false
+		stats_tab_btn.disabled = true
+	)
+	
+	# Close button
+	var close_btn = Button.new()
+	close_btn.text = Loc.t("back") if Loc.has_key("back") else "Close"
+	close_btn.add_theme_font_size_override("font_size", 14)
+	close_btn.custom_minimum_size = Vector2(120, 36)
+	close_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	vbox.add_child(close_btn)
+	close_btn.pressed.connect(func(): _clear_popup())
+
+func _deck_viewer_show_cards(container: VBoxContainer):
+	for c in container.get_children():
+		c.queue_free()
+	
+	var all_cards = GameState.get_all_deck_card_ids()
+	# Count duplicates
+	var card_counts: Dictionary = {}
+	for cid in all_cards:
+		card_counts[cid] = card_counts.get(cid, 0) + 1
+	
+	var header = Label.new()
+	header.text = Loc.tf("deck_total_cards", [all_cards.size()])
+	header.add_theme_font_size_override("font_size", 15)
+	header.add_theme_color_override("font_color", Color(0.9, 0.85, 0.7))
+	container.add_child(header)
+	
+	var grid = GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	container.add_child(grid)
+	
+	for card_id in card_counts:
+		var cdef = GameData.CARDS.get(card_id)
+		if not cdef:
+			continue
+		var count = card_counts[card_id]
+		var upgrade_lvl = GameState.get_card_upgrade_level(card_id)
+		
+		var card_panel = PanelContainer.new()
+		card_panel.custom_minimum_size = Vector2(165, 80)
+		card_panel.add_theme_stylebox_override("panel", ThemeGen.get_card_style(cdef.type))
+		grid.add_child(card_panel)
+		
+		var cvbox = VBoxContainer.new()
+		cvbox.add_theme_constant_override("separation", 2)
+		card_panel.add_child(cvbox)
+		
+		# Name + count
+		var name_text = _card_name(card_id)
+		if upgrade_lvl > 0:
+			name_text += " +%d" % (upgrade_lvl * 2)
+		if count > 1:
+			name_text += " x%d" % count
+		
+		var name_lbl = Label.new()
+		name_lbl.text = name_text
+		name_lbl.add_theme_font_size_override("font_size", 13)
+		if upgrade_lvl > 0:
+			name_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 0.5))
+		else:
+			name_lbl.add_theme_color_override("font_color", Color(0.9, 0.88, 0.82))
+		cvbox.add_child(name_lbl)
+		
+		# Cost + type
+		var type_names = ["ATK", "DEF", "MAG", "HEAL", "DICE"]
+		var info_lbl = Label.new()
+		info_lbl.text = "%d⚡ | %s | Base: %d" % [cdef.energy_cost, type_names[cdef.type], cdef.base_value + upgrade_lvl * 2]
+		info_lbl.add_theme_font_size_override("font_size", 10)
+		info_lbl.add_theme_color_override("font_color", Color(0.65, 0.6, 0.55))
+		cvbox.add_child(info_lbl)
+		
+		# Description
+		var desc_lbl = Label.new()
+		desc_lbl.text = cdef.description.replace("{value}", str(cdef.base_value + upgrade_lvl * 2))
+		desc_lbl.add_theme_font_size_override("font_size", 9)
+		desc_lbl.add_theme_color_override("font_color", Color(0.55, 0.5, 0.45))
+		desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		cvbox.add_child(desc_lbl)
+
+func _deck_viewer_show_relics(container: VBoxContainer):
+	for c in container.get_children():
+		c.queue_free()
+	
+	if GameState.relics.is_empty():
+		var empty_lbl = Label.new()
+		empty_lbl.text = Loc.t("deck_no_relics")
+		empty_lbl.add_theme_font_size_override("font_size", 14)
+		empty_lbl.add_theme_color_override("font_color", Color(0.5, 0.45, 0.4))
+		container.add_child(empty_lbl)
+		return
+	
+	var header = Label.new()
+	header.text = Loc.tf("deck_total_relics", [GameState.relics.size()])
+	header.add_theme_font_size_override("font_size", 15)
+	header.add_theme_color_override("font_color", Color(0.9, 0.85, 0.7))
+	container.add_child(header)
+	
+	for relic_id in GameState.relics:
+		var rdef = RelicData.RELICS.get(relic_id)
+		if not rdef:
+			continue
+		
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		container.add_child(row)
+		
+		# Icon
+		var tex = TextureRect.new()
+		tex.texture = load(rdef.texture_path)
+		tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tex.custom_minimum_size = Vector2(32, 32)
+		row.add_child(tex)
+		
+		# Info
+		var info_vbox = VBoxContainer.new()
+		info_vbox.add_theme_constant_override("separation", 1)
+		row.add_child(info_vbox)
+		
+		var rarity_str = RelicData.rarity_tag(rdef.rarity)
+		var name_lbl = Label.new()
+		name_lbl.text = "%s %s" % [rarity_str, Loc.t(rdef.name_key)]
+		name_lbl.add_theme_font_size_override("font_size", 14)
+		name_lbl.add_theme_color_override("font_color", RelicData.rarity_color(rdef.rarity))
+		info_vbox.add_child(name_lbl)
+		
+		var desc_lbl = Label.new()
+		desc_lbl.text = Loc.t(rdef.desc_key)
+		desc_lbl.add_theme_font_size_override("font_size", 11)
+		desc_lbl.add_theme_color_override("font_color", Color(0.6, 0.55, 0.5))
+		info_vbox.add_child(desc_lbl)
+	
+	# Dice pool
+	var sep = HSeparator.new()
+	container.add_child(sep)
+	
+	var dice_header = Label.new()
+	dice_header.text = Loc.tf("deck_dice_pool", [GameState.dice_pool.size()])
+	dice_header.add_theme_font_size_override("font_size", 14)
+	dice_header.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))
+	container.add_child(dice_header)
+	
+	var dice_row = HBoxContainer.new()
+	dice_row.add_theme_constant_override("separation", 8)
+	container.add_child(dice_row)
+	
+	for dice_id in GameState.dice_pool:
+		var lbl = Label.new()
+		lbl.text = "🎲 " + _dice_name(dice_id)
+		lbl.add_theme_font_size_override("font_size", 13)
+		dice_row.add_child(lbl)
+
+func _deck_viewer_show_stats(container: VBoxContainer):
+	for c in container.get_children():
+		c.queue_free()
+	
+	var s = GameState.stats
+	var run_time = int(s.get("run_time_sec", 0))
+	var minutes = run_time / 60
+	var seconds = run_time % 60
+	
+	var stats_data = [
+		[Loc.t("stat_floor"), "%d / %d" % [GameState.current_floor, GameState.max_floors]],
+		[Loc.t("stat_time"), "%d:%02d" % [minutes, seconds]],
+		[Loc.t("stat_enemies_killed"), str(s.get("enemies_killed", 0))],
+		[Loc.t("stat_cards_played"), str(s.get("cards_played", 0))],
+		[Loc.t("stat_damage_dealt"), str(s.get("damage_dealt", 0))],
+		[Loc.t("stat_damage_taken"), str(s.get("damage_taken", 0))],
+		[Loc.t("stat_healed"), str(s.get("healed", 0))],
+		[Loc.t("stat_gold_earned"), str(s.get("gold_earned", 0))],
+		[Loc.t("stat_dice_rolled"), str(s.get("dice_rolled", 0))],
+		[Loc.t("stat_rooms_cleared"), str(s.get("rooms_cleared", 0))],
+		[Loc.t("stat_relics_found"), str(s.get("relics_found", 0))],
+		[Loc.t("stat_highest_combo"), str(s.get("highest_combo", 0))],
+		[Loc.t("stat_cards_upgraded"), str(s.get("cards_upgraded", 0))],
+	]
+	
+	for entry in stats_data:
+		var row = HBoxContainer.new()
+		container.add_child(row)
+		
+		var key_lbl = Label.new()
+		key_lbl.text = entry[0]
+		key_lbl.add_theme_font_size_override("font_size", 14)
+		key_lbl.add_theme_color_override("font_color", Color(0.7, 0.65, 0.6))
+		key_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(key_lbl)
+		
+		var val_lbl = Label.new()
+		val_lbl.text = entry[1]
+		val_lbl.add_theme_font_size_override("font_size", 14)
+		val_lbl.add_theme_color_override("font_color", Color(1, 0.9, 0.6))
+		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(val_lbl)
 
 # ============================================================
 #  NAVIGATION

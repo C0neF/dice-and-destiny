@@ -124,11 +124,19 @@ static func generate_floor(floor_num: int, seed_val: int) -> Dictionary:
 	
 	# Populate enemies
 	var enemy_pool = ["slime", "bat"]
+	if floor_num >= 2:
+		enemy_pool.append("mushroom")
 	if floor_num >= 3:
 		enemy_pool.append("skeleton")
 		enemy_pool.append("goblin")
+	if floor_num >= 4:
+		enemy_pool.append("fire_elemental")
 	if floor_num >= 5:
 		enemy_pool.append("ghost")
+		enemy_pool.append("mimic")
+	if floor_num >= 7:
+		enemy_pool.append("dark_knight")
+		enemy_pool.append("ice_golem")
 	
 	for pos in rooms:
 		var room = rooms[pos]

@@ -20,10 +20,15 @@ extends Control
 @onready var back_btn = $SettingsPanel/VBox/BackBtn
 
 var title_time: float = 0.0
+var continue_btn: Button = null
 
 func _ready():
 	theme = ThemeGen.create_game_theme()
 	VFX.fade_in(0.5)
+	
+	# Load meta progression + language preference
+	SaveManager.load_meta()
+	
 	start_btn.pressed.connect(_on_start)
 	survivor_btn.pressed.connect(_on_survivor)
 	settings_btn.pressed.connect(_on_settings)
@@ -35,6 +40,25 @@ func _ready():
 	back_btn.pressed.connect(_on_back)
 	
 	settings_panel.visible = false
+	
+	# Add Continue button if a run save exists
+	if SaveManager.has_run_save():
+		continue_btn = Button.new()
+		continue_btn.custom_minimum_size = Vector2(220, 44)
+		continue_btn.add_theme_font_size_override("font_size", 18)
+		continue_btn.pressed.connect(_on_continue)
+		$VBox.add_child(continue_btn)
+		$VBox.move_child(continue_btn, $VBox.get_children().find(start_btn))
+	
+	# Add meta stats display
+	if GameState.meta_total_runs > 0:
+		var meta_lbl = Label.new()
+		meta_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		meta_lbl.add_theme_font_size_override("font_size", 12)
+		meta_lbl.add_theme_color_override("font_color", Color(0.5, 0.45, 0.6))
+		$VBox.add_child(meta_lbl)
+		meta_lbl.name = "MetaLabel"
+	
 	_update_texts()
 	_update_display_buttons()
 	
@@ -65,6 +89,11 @@ func _update_texts():
 	fullscreen_btn.text = Loc.t("fullscreen")
 	windowed_btn.text = Loc.t("windowed")
 	back_btn.text = Loc.t("back")
+	if continue_btn:
+		continue_btn.text = Loc.t("continue_run")
+	var meta_lbl = get_node_or_null("VBox/MetaLabel")
+	if meta_lbl:
+		meta_lbl.text = Loc.tf("meta_stats", [GameState.meta_total_runs, GameState.meta_best_floor])
 
 func _update_display_buttons():
 	var is_fs = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
@@ -73,15 +102,29 @@ func _update_display_buttons():
 
 func _on_start():
 	await VFX.fade_out(0.4)
+	SaveManager.delete_run_save()  # New run discards old save
 	GameState.reset_run()
 	GameState.run_mode = "adventure"
 	get_tree().change_scene_to_file("res://scenes/map/map_screen.tscn")
 
 func _on_survivor():
 	await VFX.fade_out(0.4)
+	SaveManager.delete_run_save()
 	GameState.reset_run()
 	GameState.run_mode = "survivor"
 	get_tree().change_scene_to_file("res://scenes/battle/survivor_arena.tscn")
+
+func _on_continue():
+	await VFX.fade_out(0.4)
+	if SaveManager.load_run():
+		if GameState.run_mode == "survivor":
+			get_tree().change_scene_to_file("res://scenes/battle/survivor_arena.tscn")
+		else:
+			get_tree().change_scene_to_file("res://scenes/map/map_screen.tscn")
+	else:
+		# Save corrupted - start new
+		GameState.reset_run()
+		get_tree().change_scene_to_file("res://scenes/map/map_screen.tscn")
 
 func _on_settings():
 	settings_panel.visible = true

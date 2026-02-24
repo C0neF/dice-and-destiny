@@ -65,8 +65,36 @@ var rooms_visited: Array[Vector2i] = []
 var current_room: Vector2i = Vector2i.ZERO
 var map_seed: int = 0
 
+# Run statistics (for end-of-run summary)
+var stats: Dictionary = {}
+
+static func _default_stats() -> Dictionary:
+	return {
+		"enemies_killed": 0,
+		"cards_played": 0,
+		"damage_dealt": 0,
+		"damage_taken": 0,
+		"gold_earned": 0,
+		"gold_spent": 0,
+		"healed": 0,
+		"dice_rolled": 0,
+		"rooms_cleared": 0,
+		"relics_found": 0,
+		"highest_combo": 0,
+		"cards_upgraded": 0,
+		"total_gold_earned": 0,
+		"total_enemies_killed": 0,
+		"run_time_sec": 0.0,
+	}
+
+var _run_start_time: float = 0.0
+
 func _ready():
 	reset_run()
+
+func _process(delta):
+	if stats.has("run_time_sec"):
+		stats["run_time_sec"] += delta
 
 func reset_run():
 	player_hp = 50
@@ -91,6 +119,8 @@ func reset_run():
 	current_room = Vector2i.ZERO
 	map_seed = randi()
 	meta_total_runs += 1
+	stats = _default_stats()
+	_run_start_time = Time.get_unix_time_from_system()
 	
 	# Starting deck
 	deck = ["strike", "strike", "strike", "block", "block", "heal", "lucky_roll"]
@@ -109,11 +139,14 @@ func take_damage(amount: int) -> int:
 	player_hp = max(0, player_hp - actual)
 	hp_changed.emit(player_hp, player_max_hp)
 	armor_changed.emit(player_armor)
+	stats["damage_taken"] = stats.get("damage_taken", 0) + actual
 	return actual
 
 func heal(amount: int):
+	var before = player_hp
 	player_hp = min(player_max_hp, player_hp + amount)
 	hp_changed.emit(player_hp, player_max_hp)
+	stats["healed"] = stats.get("healed", 0) + (player_hp - before)
 
 func add_armor(amount: int):
 	player_armor += amount
@@ -224,6 +257,9 @@ func play_card(hand_index: int) -> Dictionary:
 	# Track combo
 	combo_count += 1
 	cards_played_this_turn.append(card_id)
+	stats["cards_played"] = stats.get("cards_played", 0) + 1
+	if combo_count > stats.get("highest_combo", 0):
+		stats["highest_combo"] = combo_count
 	
 	# Remove card from hand to discard
 	hand.remove_at(hand_index)
@@ -256,6 +292,7 @@ func roll_all_dice():
 				"value": value,
 				"def": dice_def
 			})
+	stats["dice_rolled"] = stats.get("dice_rolled", 0) + 1
 
 func reroll_dice():
 	roll_all_dice()
@@ -290,6 +327,8 @@ func add_dice(dice_id: String):
 func add_gold(amount: int):
 	player_gold += amount
 	gold_changed.emit(player_gold)
+	stats["gold_earned"] = stats.get("gold_earned", 0) + amount
+	stats["total_gold_earned"] = stats.get("total_gold_earned", 0) + amount
 
 func next_floor():
 	current_floor += 1
@@ -297,6 +336,9 @@ func next_floor():
 	current_room = Vector2i.ZERO
 	map_seed = randi()
 	floor_changed.emit(current_floor)
+	# Update meta best
+	if current_floor > meta_best_floor:
+		meta_best_floor = current_floor
 
 func is_dead() -> bool:
 	return player_hp <= 0
@@ -307,6 +349,7 @@ func is_victory() -> bool:
 func add_relic(relic_id: String):
 	if not relics.has(relic_id):
 		relics.append(relic_id)
+		stats["relics_found"] = stats.get("relics_found", 0) + 1
 		# Apply immediate relic effects
 		match relic_id:
 			"blood_vial":
@@ -324,6 +367,7 @@ func upgrade_card(card_id: String):
 		card_upgrades[card_id] += 1
 	else:
 		card_upgrades[card_id] = 1
+	stats["cards_upgraded"] = stats.get("cards_upgraded", 0) + 1
 
 func get_card_upgrade_level(card_id: String) -> int:
 	return card_upgrades.get(card_id, 0)

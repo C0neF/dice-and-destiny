@@ -21,6 +21,7 @@ config/icon="res://icon.svg"
 GameState="*res://scripts/core/game_state.gd"
 VFX="*res://scripts/core/vfx_manager.gd"
 Loc="*res://scripts/core/loc.gd"
+SaveManager="*res://scripts/core/save_manager.gd"
 
 [display]
 

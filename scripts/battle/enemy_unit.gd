@@ -34,6 +34,21 @@ func setup(def: GameData.EnemyDef, player: Node2D, level_scale: float = 1.0):
 	move_speed = 30.0 + randf() * 20.0  # Slight variation
 	target = player
 	
+	# Per-type speed tuning
+	match def.type:
+		GameData.EnemyType.BAT:
+			move_speed = 55.0 + randf() * 15.0  # Fast
+		GameData.EnemyType.FIRE_ELEMENTAL:
+			move_speed = 60.0 + randf() * 20.0  # Very fast
+		GameData.EnemyType.MUSHROOM:
+			move_speed = 20.0 + randf() * 10.0  # Slow
+		GameData.EnemyType.ICE_GOLEM:
+			move_speed = 18.0 + randf() * 8.0   # Very slow
+		GameData.EnemyType.DARK_KNIGHT:
+			move_speed = 35.0 + randf() * 10.0  # Moderate
+		GameData.EnemyType.MIMIC:
+			move_speed = 25.0 + randf() * 15.0  # Slow-moderate
+	
 	# Sprite
 	sprite = Sprite2D.new()
 	sprite.name = "Sprite"
@@ -95,6 +110,13 @@ func _physics_process(delta):
 	# Chase player
 	var dir = (target.global_position - global_position).normalized()
 	var speed = move_speed * slow_factor
+	
+	# Dark Knight: periodic charge burst
+	if enemy_def and enemy_def.type == GameData.EnemyType.DARK_KNIGHT:
+		var dist = global_position.distance_to(target.global_position)
+		if dist < 120 and dist > 30 and damage_cooldown <= 0:
+			speed *= 2.5  # Charge!
+	
 	velocity = dir * speed + knockback_vel
 	knockback_vel = knockback_vel.move_toward(Vector2.ZERO, 200 * delta)
 	move_and_slide()
@@ -130,6 +152,7 @@ func take_damage(amount: int, knockback_dir: Vector2 = Vector2.ZERO):
 		hp_bar_fill.size.x = 14.0 * max(0, hp) / max(1, max_hp)
 	
 	if hp <= 0:
+		_on_death()
 		died.emit(self, global_position)
 		queue_free()
 
@@ -138,3 +161,115 @@ func get_contact_damage() -> int:
 		return 0
 	damage_cooldown = 0.5
 	return damage
+
+## Special death effects based on enemy type
+func _on_death():
+	if not enemy_def:
+		return
+	match enemy_def.type:
+		GameData.EnemyType.MUSHROOM:
+			_death_poison_cloud()
+		GameData.EnemyType.FIRE_ELEMENTAL:
+			_death_explode()
+		GameData.EnemyType.ICE_GOLEM:
+			_death_freeze_burst()
+
+## Mushroom: leaves a poison cloud at death position
+func _death_poison_cloud():
+	var cloud = Node2D.new()
+	cloud.position = global_position
+	cloud.z_index = -1  # Below player so character walks over the cloud
+	get_parent().add_child(cloud)
+	
+	# Visual: scattered circular particles that drift and pulse
+	var particles: Array = []
+	for i in range(12):
+		var p = ColorRect.new()
+		var sz = randf_range(3, 7)
+		p.size = Vector2(sz, sz)
+		var angle = randf() * TAU
+		var dist = randf_range(2, 18)
+		p.position = Vector2(cos(angle), sin(angle)) * dist - p.size / 2
+		p.color = Color(0.2, randf_range(0.6, 0.85), 0.1, randf_range(0.15, 0.35))
+		# Round corners to look like blobs
+		cloud.add_child(p)
+		particles.append(p)
+	
+	var duration = 3.0
+	var elapsed = 0.0
+	var tick_acc = 0.0
+	
+	var timer = Timer.new()
+	timer.wait_time = 0.1
+	timer.autostart = true
+	cloud.add_child(timer)
+	timer.timeout.connect(func():
+		elapsed += 0.1
+		tick_acc += 0.1
+		if elapsed >= duration:
+			cloud.queue_free()
+			return
+		# Fade out in last second
+		var alpha_mult = 1.0 if elapsed < duration - 1.0 else (duration - elapsed)
+		# Animate particles: drift + pulse
+		for j in range(particles.size()):
+			if not is_instance_valid(particles[j]):
+				continue
+			var p = particles[j]
+			var drift = Vector2(randf_range(-0.5, 0.5), randf_range(-0.3, -0.8))
+			p.position += drift
+			p.modulate.a = (0.2 + sin(elapsed * 3.0 + j) * 0.1) * alpha_mult
+		# Damage player if nearby
+		if tick_acc >= 0.5 and is_instance_valid(target):
+			tick_acc = 0.0
+			if target.global_position.distance_to(cloud.position) < 30:
+				GameState.poison_stacks += 1
+	)
+
+## Fire Elemental: explodes on death dealing AoE damage
+func _death_explode():
+	var explode_dmg = damage * 2
+	var radius = 45.0
+	# Damage all enemies AND player in range
+	if is_instance_valid(target):
+		if target.global_position.distance_to(global_position) < radius:
+			GameState.take_damage_with_relics(explode_dmg)
+			VFX.flash_screen(Color(1, 0.2, 0.0, 0.35), 0.2)
+	# Also damage other enemies (chain reaction potential)
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e != self and is_instance_valid(e) and e.has_method("take_damage"):
+			if e.global_position.distance_to(global_position) < radius:
+				e.take_damage(explode_dmg / 2, (e.global_position - global_position).normalized())
+	# Visual explosion
+	VFX.screen_shake(3.0, 6.0)
+	_spawn_death_ring(Color(1, 0.4, 0.0), radius)
+
+## Ice Golem: freezes nearby enemies briefly on death (helps player!)
+func _death_freeze_burst():
+	var radius = 40.0
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e != self and is_instance_valid(e):
+			if e.global_position.distance_to(global_position) < radius:
+				e.freeze_timer = max(e.freeze_timer, 1.5)
+	_spawn_death_ring(Color(0.3, 0.6, 1.0), radius)
+
+func _spawn_death_ring(color: Color, radius: float):
+	var ring = Node2D.new()
+	ring.position = global_position
+	ring.z_index = 15
+	get_parent().add_child(ring)
+	for i in range(12):
+		var angle = (i / 12.0) * TAU
+		var p = ColorRect.new()
+		p.size = Vector2(4, 4)
+		p.position = Vector2(-2, -2)
+		p.color = color
+		ring.add_child(p)
+		var tw = p.create_tween()
+		var dest = Vector2(cos(angle), sin(angle)) * radius
+		tw.tween_property(p, "position", dest, 0.3).set_ease(Tween.EASE_OUT)
+		tw.parallel().tween_property(p, "modulate:a", 0.0, 0.35)
+	get_tree().create_timer(0.5).timeout.connect(func():
+		if is_instance_valid(ring):
+			ring.queue_free()
+	)

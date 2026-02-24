@@ -6,7 +6,7 @@ enum CardType { ATTACK, DEFEND, MAGIC, HEAL, DICE_BOOST }
 # Dice types  
 enum DiceType { NORMAL, FIRE, ICE, POISON }
 # Enemy types
-enum EnemyType { SLIME, SKELETON, BAT, GOBLIN, GHOST, DEMON }
+enum EnemyType { SLIME, SKELETON, BAT, GOBLIN, GHOST, DEMON, MUSHROOM, MIMIC, FIRE_ELEMENTAL, DARK_KNIGHT, ICE_GOLEM }
 
 # Card definition
 class CardDef:
@@ -128,6 +128,17 @@ static func _static_init():
 		"res://assets/sprites/enemies/ghost.png", false, ["fireball", "mirror_shield"])
 	ENEMIES["demon"] = EnemyDef.new(EnemyType.DEMON, "Demon Lord", 60, 12, 5,
 		"res://assets/sprites/enemies/demon.png", true, ["lucky_roll"])
+	# --- New enemies ---
+	ENEMIES["mushroom"] = EnemyDef.new(EnemyType.MUSHROOM, "Poison Mushroom", 22, 4, 1,
+		"res://assets/sprites/enemies/mushroom.png", false, ["poison_strike"])
+	ENEMIES["mimic"] = EnemyDef.new(EnemyType.MIMIC, "Mimic", 30, 9, 3,
+		"res://assets/sprites/enemies/mimic.png", false, ["loaded_dice", "heavy_strike"])
+	ENEMIES["fire_elemental"] = EnemyDef.new(EnemyType.FIRE_ELEMENTAL, "Fire Elemental", 10, 7, 0,
+		"res://assets/sprites/enemies/fire_elemental.png", false, ["fireball", "inferno"])
+	ENEMIES["dark_knight"] = EnemyDef.new(EnemyType.DARK_KNIGHT, "Dark Knight", 35, 10, 5,
+		"res://assets/sprites/enemies/dark_knight.png", false, ["heavy_strike", "fortress"])
+	ENEMIES["ice_golem"] = EnemyDef.new(EnemyType.ICE_GOLEM, "Ice Golem", 45, 6, 4,
+		"res://assets/sprites/enemies/ice_golem.png", false, ["ice_shard", "block"])
 
 # Enemy intent types
 enum IntentType { ATTACK, DEFEND, BUFF, DEBUFF, SPECIAL }
@@ -162,12 +173,53 @@ static func get_enemy_intent(enemy_type: int, turn: int, enemy_hp_pct: float) ->
 				return EnemyIntent.new(IntentType.DEBUFF, 3, "Cursing...")
 			return EnemyIntent.new(IntentType.ATTACK, 8)
 		EnemyType.DEMON:
-			if turn % 4 == 0:
-				return EnemyIntent.new(IntentType.SPECIAL, 15, "Charging...")
-			elif turn % 4 == 1:
-				return EnemyIntent.new(IntentType.BUFF, 5, "Enraging...")
-			elif turn % 4 == 2:
-				return EnemyIntent.new(IntentType.DEBUFF, 3, "Cursing...")
-			return EnemyIntent.new(IntentType.ATTACK, 12)
+			# === Multi-phase Demon Lord ===
+			# Phase 1 (HP > 60%): Standard pattern
+			if enemy_hp_pct > 0.6:
+				if turn % 4 == 0:
+					return EnemyIntent.new(IntentType.SPECIAL, 15, "Charging...")
+				elif turn % 4 == 1:
+					return EnemyIntent.new(IntentType.BUFF, 3, "Enraging...")
+				elif turn % 4 == 2:
+					return EnemyIntent.new(IntentType.DEBUFF, 3, "Cursing...")
+				return EnemyIntent.new(IntentType.ATTACK, 12)
+			# Phase 2 (60% >= HP > 25%): Empowered — stronger attacks + more buffs
+			elif enemy_hp_pct > 0.25:
+				if turn % 3 == 0:
+					return EnemyIntent.new(IntentType.BUFF, 5, "Demon Rage!")
+				elif turn % 3 == 1:
+					return EnemyIntent.new(IntentType.SPECIAL, 20, "Hellfire!")
+				return EnemyIntent.new(IntentType.ATTACK, 15)
+			# Phase 3 (HP <= 25%): Desperate — every turn is dangerous
+			else:
+				if turn % 2 == 0:
+					return EnemyIntent.new(IntentType.SPECIAL, 25, "Armageddon!")
+				return EnemyIntent.new(IntentType.ATTACK, 18)
+		EnemyType.MUSHROOM:
+			if turn % 2 == 0:
+				return EnemyIntent.new(IntentType.DEBUFF, 3, "Sporing...")
+			return EnemyIntent.new(IntentType.ATTACK, 4)
+		EnemyType.MIMIC:
+			if turn == 1:
+				return EnemyIntent.new(IntentType.BUFF, 4, "Awakening...")
+			if enemy_hp_pct < 0.3:
+				return EnemyIntent.new(IntentType.SPECIAL, 12, "Devouring...")
+			return EnemyIntent.new(IntentType.ATTACK, 9)
+		EnemyType.FIRE_ELEMENTAL:
+			if turn % 3 == 0:
+				return EnemyIntent.new(IntentType.SPECIAL, 8, "Igniting...")
+			return EnemyIntent.new(IntentType.ATTACK, 7)
+		EnemyType.DARK_KNIGHT:
+			if turn % 3 == 0:
+				return EnemyIntent.new(IntentType.DEFEND, 8)
+			elif turn % 3 == 1:
+				return EnemyIntent.new(IntentType.BUFF, 3, "Rallying...")
+			return EnemyIntent.new(IntentType.ATTACK, 10)
+		EnemyType.ICE_GOLEM:
+			if turn % 3 == 0:
+				return EnemyIntent.new(IntentType.DEFEND, 6)
+			elif turn % 4 == 0:
+				return EnemyIntent.new(IntentType.DEBUFF, 2, "Chilling...")
+			return EnemyIntent.new(IntentType.ATTACK, 6)
 		_:
 			return EnemyIntent.new(IntentType.ATTACK, 5)

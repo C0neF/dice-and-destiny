@@ -13,22 +13,22 @@ var target: Node2D = null  # Player ref
 var _blink_timer: float = 0.0
 var _spawn_anim: float = 0.0
 var _spawn_dir: Vector2 = Vector2.ZERO
-var sprite: ColorRect
+var icon_label: Label
 var glow: ColorRect
 
 # Arena bounds (set by SurvivorArena)
 var arena_min: Vector2 = Vector2(-22, 22)
 var arena_max: Vector2 = Vector2(662, 368)
 
-# Drop type configs: [color, size, label]
+# Drop type configs: [color, size, icon_emoji]
 const DROP_CONFIG = {
-	DropType.GOLD: [Color(1, 0.85, 0.1), 4.0, "G"],
-	DropType.HEALTH_POTION: [Color(0.9, 0.15, 0.2), 5.0, "+"],
-	DropType.SPEED_BOOST: [Color(0.2, 0.9, 1.0), 5.0, "S"],
-	DropType.DAMAGE_BOOST: [Color(1, 0.4, 0.1), 5.0, "D"],
-	DropType.ENERGY_ORB: [Color(0.4, 0.5, 1.0), 4.0, "E"],
-	DropType.MAGNET: [Color(0.8, 0.8, 0.8), 5.0, "M"],
-	DropType.BOMB: [Color(1, 0.3, 0.0), 6.0, "B"],
+	DropType.GOLD:          [Color(1, 0.85, 0.1),  4.0, "🪙"],
+	DropType.HEALTH_POTION: [Color(0.9, 0.15, 0.2), 5.0, "❤️"],
+	DropType.SPEED_BOOST:   [Color(0.2, 0.9, 1.0),  5.0, "⚡"],
+	DropType.DAMAGE_BOOST:  [Color(1, 0.4, 0.1),    5.0, "🔥"],
+	DropType.ENERGY_ORB:    [Color(0.4, 0.5, 1.0),  4.0, "💎"],
+	DropType.MAGNET:        [Color(0.8, 0.8, 0.8),  5.0, "🧲"],
+	DropType.BOMB:          [Color(1, 0.3, 0.0),    6.0, "💣"],
 }
 
 func setup(type: int, val: int, player: Node2D, spawn_pos: Vector2):
@@ -44,20 +44,22 @@ func _ready():
 	var config = DROP_CONFIG.get(drop_type, [Color.WHITE, 4.0, "?"])
 	var color: Color = config[0]
 	var sz: float = config[1]
+	var icon: String = config[2]
 	
-	# Glow effect (larger, semi-transparent)
+	# Glow effect (colored circle behind icon)
 	glow = ColorRect.new()
 	glow.size = Vector2(sz * 2.5, sz * 2.5)
 	glow.position = -glow.size / 2
 	glow.color = Color(color.r, color.g, color.b, 0.25)
 	add_child(glow)
 	
-	# Main sprite
-	sprite = ColorRect.new()
-	sprite.size = Vector2(sz, sz)
-	sprite.position = -sprite.size / 2
-	sprite.color = color
-	add_child(sprite)
+	# Emoji icon label
+	icon_label = Label.new()
+	icon_label.text = icon
+	icon_label.add_theme_font_size_override("font_size", 10)
+	icon_label.position = Vector2(-7, -8)
+	icon_label.z_index = 1
+	add_child(icon_label)
 	
 	# Collision for pickup
 	var col = CollisionShape2D.new()
@@ -68,8 +70,8 @@ func _ready():
 	
 	collision_layer = 0
 	collision_mask = 1  # Detect player on layer 1
-	monitoring = true
-	monitorable = false
+	set_deferred("monitoring", true)
+	set_deferred("monitorable", false)
 	body_entered.connect(_on_body_entered)
 
 func _physics_process(delta):
@@ -94,8 +96,8 @@ func _physics_process(delta):
 		return
 	
 	# Float/bob animation
-	if sprite:
-		sprite.position.y = -sprite.size.y / 2 + sin(lifetime * 4.0) * 1.5
+	if icon_label:
+		icon_label.position.y = -8 + sin(lifetime * 4.0) * 1.5
 	if glow:
 		glow.position.y = -glow.size.y / 2 + sin(lifetime * 4.0) * 1.5
 		glow.modulate.a = 0.4 + sin(lifetime * 6.0) * 0.2

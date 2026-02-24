@@ -40,6 +40,11 @@ var _lightning_timer: float = 0.0
 var _flame_tornado_timer: float = 0.0
 var _ice_nova_timer: float = 0.0
 var _poison_cloud_timer: float = 0.0
+var _holy_cross_timer: float = 0.0
+var _meteor_timer: float = 0.0
+var _spirit_sword_timer: float = 0.0
+var _earthquake_timer: float = 0.0
+var _vampiric_aura_timer: float = 0.0
 var _orbit_visual: Node2D
 
 # Wave state
@@ -51,6 +56,8 @@ var spawn_timer: float = 0.0
 var spawn_interval: float = 1.5
 var is_wave_active: bool = false
 var is_shopping: bool = false
+var is_paused: bool = false
+var _pause_layer: CanvasLayer = null
 
 # Dice state
 var dice_timer: float = 0.0
@@ -71,11 +78,20 @@ var card_panels: Array = []
 var log_label: RichTextLabel
 
 func _ready():
+	# Allow this node to process input even when tree is paused
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_setup_arena()
 	_setup_player()
 	_setup_ui()
 	_start_wave(1)
 	VFX.fade_in(0.4)
+
+func _unhandled_input(event):
+	if event.is_action_pressed("ui_cancel"):
+		if is_paused:
+			_resume_game()
+		elif not is_shopping:
+			_pause_game()
 
 func _setup_arena():
 	# Background - use generated dungeon map
@@ -129,14 +145,17 @@ func _setup_arena():
 	
 	enemy_container = Node2D.new()
 	enemy_container.name = "Enemies"
+	enemy_container.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(enemy_container)
 	
 	projectile_container = Node2D.new()
 	projectile_container.name = "Projectiles"
+	projectile_container.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(projectile_container)
 	
 	drop_container = Node2D.new()
 	drop_container.name = "Drops"
+	drop_container.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(drop_container)
 
 ## Build four wall StaticBody2Ds that border the playable area.
@@ -176,6 +195,7 @@ func _setup_player():
 	var script = load("res://scripts/battle/player_controller.gd")
 	player.set_script(script)
 	player.position = Vector2(320, 180)  # Center of playable area
+	player.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(player)
 	# Pass arena bounds so the player clamp uses shared constants
 	player.arena_min = ARENA_MIN
@@ -306,7 +326,7 @@ func _card_name(card_id: String, card_def = null) -> String:
 	return card_id
 
 func _process(delta):
-	if is_shopping:
+	if is_paused or is_shopping:
 		return
 	
 	if is_wave_active:
@@ -405,15 +425,23 @@ func _spawn_enemy():
 
 func _get_enemy_pool() -> Array:
 	var pool = ["slime", "bat"]
+	if current_wave >= 2: pool.append("mushroom")
 	if current_wave >= 3: pool.append_array(["skeleton", "goblin"])
-	if current_wave >= 5: pool.append("ghost")
-	if current_wave >= 7: pool.append_array(["slime", "skeleton", "goblin"])  # More variety
+	if current_wave >= 4: pool.append("fire_elemental")
+	if current_wave >= 5: pool.append_array(["ghost", "mimic"])
+	if current_wave >= 7: pool.append_array(["dark_knight", "ice_golem"])
+	if current_wave >= 9: pool.append_array(["skeleton", "goblin", "fire_elemental"])  # More spawns
 	return pool
 
 func _on_enemy_died(_enemy, _pos: Vector2):
 	enemies_alive -= 1
 	# Spawn drops
 	_spawn_drops(_pos)
+	# Mimic: bonus gold + guaranteed health potion
+	if _enemy is CharacterBody2D and _enemy.enemy_def \
+			and _enemy.enemy_def.type == GameData.EnemyType.MIMIC:
+		_create_drop(0, randi_range(8, 15), _pos)  # Extra gold
+		_create_drop(1, 15, _pos)  # Health potion
 	if GameState.relics.has("blood_vial"):
 		GameState.heal(1)
 
@@ -532,9 +560,42 @@ func _on_wave_end():
 	# Heal between waves
 	GameState.heal(GameState.player_max_hp / 5)
 	
-	# Enter shop phase
-	await get_tree().create_timer(1.0).timeout
+	# Instantly collect ALL remaining drops (no animation delay)
+	_force_collect_all_drops()
+	
+	# Brief pause then open shop
+	await get_tree().create_timer(0.5).timeout
 	_open_shop()
+
+## Force-collect every drop on the field immediately (no magnet flight).
+## This guarantees gold is accurate before the shop opens.
+func _force_collect_all_drops():
+	var drops = drop_container.get_children().duplicate()
+	for drop in drops:
+		if not is_instance_valid(drop):
+			continue
+		# Emit the collected signal so gold/items are credited
+		if drop.has_signal("collected"):
+			drop.collected.emit(drop.drop_type, drop.value)
+		# Spawn a quick fly-to-player visual
+		if is_instance_valid(player):
+			_spawn_collect_fly(drop.global_position, player.global_position, drop)
+		drop.queue_free()
+
+## Small particle that flies from drop position to player (cosmetic only)
+func _spawn_collect_fly(from: Vector2, to: Vector2, drop):
+	var config = drop.DROP_CONFIG.get(drop.drop_type, [Color(1, 0.85, 0.1), 4.0, "?"])
+	var color: Color = config[0]
+	var p = ColorRect.new()
+	p.size = Vector2(3, 3)
+	p.position = from - Vector2(1.5, 1.5)
+	p.color = color
+	p.z_index = 20
+	add_child(p)
+	var tw = p.create_tween()
+	tw.tween_property(p, "position", to - Vector2(1.5, 1.5), 0.3).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(p, "modulate:a", 0.0, 0.35)
+	tw.tween_callback(p.queue_free)
 
 # === DICE SYSTEM ===
 
@@ -656,6 +717,50 @@ func _update_passive_attacks(delta):
 		if _poison_cloud_timer >= 1.5:
 			_poison_cloud_timer = 0.0
 			_apply_poison_cloud(lvl)
+	
+	# Holy cross - fires projectiles in 4 cardinal directions
+	if unlocked_attacks.has("holy_cross"):
+		lvl = attack_levels.get("holy_cross", 1)
+		_holy_cross_timer += delta
+		var interval = max(1.0, 2.5 - lvl * 0.3)
+		if _holy_cross_timer >= interval:
+			_holy_cross_timer = 0.0
+			_fire_holy_cross(lvl)
+	
+	# Meteor rain - drops meteors on random enemies
+	if unlocked_attacks.has("meteor_rain"):
+		lvl = attack_levels.get("meteor_rain", 1)
+		_meteor_timer += delta
+		var interval = max(2.0, 4.5 - lvl * 0.5)
+		if _meteor_timer >= interval:
+			_meteor_timer = 0.0
+			_drop_meteors(lvl)
+	
+	# Spirit swords - homing projectiles seeking enemies
+	if unlocked_attacks.has("spirit_sword"):
+		lvl = attack_levels.get("spirit_sword", 1)
+		_spirit_sword_timer += delta
+		var interval = max(1.5, 3.5 - lvl * 0.4)
+		if _spirit_sword_timer >= interval:
+			_spirit_sword_timer = 0.0
+			_fire_spirit_swords(lvl)
+	
+	# Earthquake - periodic shockwave expanding from player
+	if unlocked_attacks.has("earthquake"):
+		lvl = attack_levels.get("earthquake", 1)
+		_earthquake_timer += delta
+		var interval = max(3.0, 6.0 - lvl * 0.6)
+		if _earthquake_timer >= interval:
+			_earthquake_timer = 0.0
+			_trigger_earthquake(lvl)
+	
+	# Vampiric aura - drains HP from nearby enemies, heals player
+	if unlocked_attacks.has("vampiric_aura"):
+		lvl = attack_levels.get("vampiric_aura", 1)
+		_vampiric_aura_timer += delta
+		if _vampiric_aura_timer >= 2.0:
+			_vampiric_aura_timer = 0.0
+			_apply_vampiric_aura(lvl)
 
 ## Orbiting blades that damage enemies on contact
 func _update_orbit_blades(lvl: int):
@@ -844,6 +949,260 @@ func _apply_poison_cloud(lvl: int):
 			if e.global_position.distance_to(player.global_position) < radius:
 				e.take_damage(dmg, Vector2.ZERO)
 				e.poison_stacks = max(e.poison_stacks, lvl)
+
+## Holy cross - fires projectiles in 4 (+ diagonals at higher levels) directions
+func _fire_holy_cross(lvl: int):
+	var dmg = int((4 + lvl * 3) * _get_damage_multiplier())
+	var speed = 160.0 + lvl * 15
+	var directions = [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]
+	# Lvl 3+: add diagonals
+	if lvl >= 3:
+		directions.append_array([
+			Vector2(1, 1).normalized(), Vector2(1, -1).normalized(),
+			Vector2(-1, 1).normalized(), Vector2(-1, -1).normalized()
+		])
+	var pierce_count = 1 + lvl
+	for dir in directions:
+		var p = _create_projectile(player.global_position, dir, dmg, speed)
+		p.pierce = pierce_count
+		p.setup_visual(Color(1, 0.95, 0.6), 5)
+	# Visual flash
+	VFX.flash_screen(Color(1, 1, 0.8, 0.1), 0.06)
+
+## Meteor rain - drops AoE meteors on random enemy positions
+func _drop_meteors(lvl: int):
+	var count = 1 + lvl
+	var dmg = int((10 + lvl * 5) * _get_damage_multiplier())
+	var radius = 35.0 + lvl * 8
+	var targets = _find_enemies_in_range(player.global_position, 250.0 + lvl * 30)
+	if targets.is_empty():
+		return
+	
+	for i in range(count):
+		var target_enemy = targets[randi() % targets.size()]
+		if not is_instance_valid(target_enemy):
+			continue
+		var impact_pos = target_enemy.global_position + Vector2(randf_range(-15, 15), randf_range(-15, 15))
+		# Delayed impact via timer
+		var delay = i * 0.2
+		_spawn_meteor(impact_pos, dmg, radius, delay)
+	
+	add_log("[color=red]☄️ Meteor x%d![/color]" % count)
+
+func _spawn_meteor(pos: Vector2, dmg: int, radius: float, delay: float):
+	# Warning indicator
+	var warning = ColorRect.new()
+	warning.size = Vector2(radius * 2, radius * 2)
+	warning.position = pos - Vector2(radius, radius)
+	warning.color = Color(1, 0.3, 0.0, 0.15)
+	warning.z_index = 8
+	add_child(warning)
+	
+	# Grow the warning
+	var tw = warning.create_tween()
+	tw.tween_property(warning, "modulate:a", 0.6, 0.3 + delay)
+	tw.tween_callback(func():
+		# Impact!
+		for e in enemy_container.get_children():
+			if e.has_method("take_damage"):
+				if e.global_position.distance_to(pos) < radius:
+					var kb = (e.global_position - pos).normalized()
+					e.take_damage(dmg, kb)
+					e.burn_stacks += 2
+		# Visual explosion
+		_spawn_explosion_ring(pos, radius, Color(1, 0.4, 0.0))
+		VFX.screen_shake(4.0, 5.0)
+		warning.queue_free()
+	)
+
+## Spirit swords - homing projectiles that chase the nearest enemy
+func _fire_spirit_swords(lvl: int):
+	var count = 1 + (lvl / 2)  # 1 at lv1-2, 2 at lv3-4, 3 at lv5+
+	var dmg = int((6 + lvl * 2) * _get_damage_multiplier())
+	
+	for i in range(count):
+		var angle = randf() * TAU
+		var spawn_offset = Vector2(cos(angle), sin(angle)) * 20
+		var sword = Area2D.new()
+		sword.position = player.global_position + spawn_offset
+		sword.z_index = 12
+		add_child(sword)
+		sword.add_to_group("spirit_swords")
+		
+		# Visual
+		var sprite = ColorRect.new()
+		sprite.size = Vector2(8, 3)
+		sprite.position = Vector2(-4, -1.5)
+		sprite.color = Color(0.5, 0.8, 1.0, 0.9)
+		sword.add_child(sprite)
+		
+		# Collision
+		var col = CollisionShape2D.new()
+		var shape = CircleShape2D.new()
+		shape.radius = 5.0
+		col.shape = shape
+		sword.add_child(col)
+		sword.collision_layer = 0
+		sword.collision_mask = 2
+		sword.monitoring = true
+		sword.monitorable = false
+		
+		# Homing logic via metadata
+		var meta = {"dmg": dmg, "speed": 130.0 + lvl * 20, "lifetime": 3.0, "hit": []}
+		sword.set_meta("sword_data", meta)
+		
+		sword.body_entered.connect(func(body):
+			if body.has_method("take_damage") and not meta.hit.has(body):
+				meta.hit.append(body)
+				var kb = (body.global_position - sword.global_position).normalized()
+				body.take_damage(meta.dmg, kb)
+				# Visual hit
+				_spawn_damage_hit_flash(sword.global_position, Color(0.5, 0.8, 1.0))
+				sword.queue_free()
+		)
+		
+		# Drive homing via process
+		var _process_cb: Callable
+		_process_cb = func(delta_inner: float):
+			if not is_instance_valid(sword):
+				return
+			meta.lifetime -= delta_inner
+			if meta.lifetime <= 0:
+				sword.queue_free()
+				return
+			# Find nearest enemy
+			var best: Node2D = null
+			var best_dist = 250.0
+			for e in enemy_container.get_children():
+				if e.has_method("take_damage") and not meta.hit.has(e):
+					var d = e.global_position.distance_to(sword.global_position)
+					if d < best_dist:
+						best_dist = d
+						best = e
+			if best:
+				var dir = (best.global_position - sword.global_position).normalized()
+				sword.position += dir * meta.speed * delta_inner
+				# Rotate sprite to face direction
+				sprite.rotation = dir.angle()
+			else:
+				# Drift forward
+				sword.position += Vector2.RIGHT.rotated(sprite.rotation) * meta.speed * delta_inner * 0.5
+		
+		var timer = Timer.new()
+		timer.wait_time = 0.016
+		timer.autostart = true
+		sword.add_child(timer)
+		timer.timeout.connect(func(): _process_cb.call(0.016))
+
+func _spawn_damage_hit_flash(pos: Vector2, color: Color):
+	for j in range(3):
+		var p = ColorRect.new()
+		p.size = Vector2(3, 3)
+		p.position = pos + Vector2(randf_range(-6, 6), randf_range(-6, 6))
+		p.color = color
+		p.z_index = 20
+		add_child(p)
+		var tw = p.create_tween()
+		tw.tween_property(p, "modulate:a", 0.0, 0.25)
+		tw.tween_callback(p.queue_free)
+
+## Earthquake - expanding shockwave from player that damages + knocks back
+func _trigger_earthquake(lvl: int):
+	var max_radius = 100.0 + lvl * 25
+	var dmg = int((8 + lvl * 4) * _get_damage_multiplier())
+	var kb_force = 200.0 + lvl * 30
+	
+	VFX.screen_shake(6.0 + lvl, 4.0)
+	VFX.flash_screen(Color(0.6, 0.4, 0.1, 0.2), 0.15)
+	
+	# Expanding ring visual + damage
+	var ring = Node2D.new()
+	ring.position = player.global_position
+	ring.z_index = 8
+	add_child(ring)
+	
+	var current_radius = 0.0
+	var duration = 0.5
+	var elapsed = 0.0
+	var hit_enemies: Array = []
+	
+	var step_timer = Timer.new()
+	step_timer.wait_time = 0.033
+	step_timer.autostart = true
+	ring.add_child(step_timer)
+	
+	step_timer.timeout.connect(func():
+		elapsed += 0.033
+		if elapsed >= duration or not is_instance_valid(ring):
+			if is_instance_valid(ring):
+				ring.queue_free()
+			return
+		
+		current_radius = (elapsed / duration) * max_radius
+		
+		# Draw ring particles
+		for k in range(4):
+			var angle = randf() * TAU
+			var p = ColorRect.new()
+			p.size = Vector2(4, 4)
+			p.position = Vector2(cos(angle), sin(angle)) * current_radius - Vector2(2, 2)
+			p.color = Color(0.7, 0.5, 0.2, 0.8)
+			p.z_index = 8
+			ring.add_child(p)
+			var tw = p.create_tween()
+			tw.tween_property(p, "modulate:a", 0.0, 0.2)
+			tw.tween_callback(p.queue_free)
+		
+		# Damage enemies in the ring zone
+		for e in enemy_container.get_children():
+			if e.has_method("take_damage") and not hit_enemies.has(e):
+				var dist = e.global_position.distance_to(ring.position)
+				if dist >= current_radius - 15 and dist <= current_radius + 15:
+					var kb = (e.global_position - ring.position).normalized()
+					e.take_damage(dmg, kb * kb_force / 150.0)
+					hit_enemies.append(e)
+	)
+	
+	get_tree().create_timer(duration + 0.1).timeout.connect(func():
+		if is_instance_valid(ring):
+			ring.queue_free()
+	)
+	
+	add_log("[color=yellow]🌍 Earthquake! %d radius[/color]" % int(max_radius))
+
+## Vampiric aura - drains HP from nearby enemies, heals player
+func _apply_vampiric_aura(lvl: int):
+	var radius = 50.0 + lvl * 12
+	var dmg = int((2 + lvl) * _get_damage_multiplier())
+	var heal_total = 0
+	var hit_count = 0
+	
+	for e in enemy_container.get_children():
+		if e.has_method("take_damage"):
+			if e.global_position.distance_to(player.global_position) < radius:
+				e.take_damage(dmg, Vector2.ZERO)
+				hit_count += 1
+				# Visual drain line
+				_spawn_drain_line(e.global_position, player.global_position)
+	
+	if hit_count > 0:
+		heal_total = 1 + (hit_count * lvl) / 2
+		GameState.heal(heal_total)
+		player.update_hp_bar(GameState.player_hp, GameState.player_max_hp)
+
+func _spawn_drain_line(from: Vector2, to: Vector2):
+	var line = Line2D.new()
+	line.width = 1.5
+	line.default_color = Color(0.8, 0.15, 0.2, 0.7)
+	line.z_index = 12
+	line.add_point(from)
+	var mid = (from + to) / 2 + Vector2(randf_range(-8, 8), randf_range(-8, 8))
+	line.add_point(mid)
+	line.add_point(to)
+	add_child(line)
+	var tw = line.create_tween()
+	tw.tween_property(line, "modulate:a", 0.0, 0.3)
+	tw.tween_callback(line.queue_free)
 
 func _create_projectile(from: Vector2, dir: Vector2, dmg: int, spd: float = 200.0) -> Node2D:
 	var proj = Area2D.new()
@@ -1177,10 +1536,15 @@ func _open_shop():
 		["flame_tornado", "火焰旋风" if Loc.current_lang == "zh" else "Flame Tornado", 30],
 		["ice_nova", "冰霜新星" if Loc.current_lang == "zh" else "Ice Nova", 25],
 		["poison_cloud", "毒雾" if Loc.current_lang == "zh" else "Poison Cloud", 20],
+		["holy_cross", "圣光十字" if Loc.current_lang == "zh" else "Holy Cross", 25],
+		["meteor_rain", "陨石雨" if Loc.current_lang == "zh" else "Meteor Rain", 35],
+		["spirit_sword", "灵魂飞剑" if Loc.current_lang == "zh" else "Spirit Sword", 30],
+		["earthquake", "地震" if Loc.current_lang == "zh" else "Earthquake", 30],
+		["vampiric_aura", "吸血光环" if Loc.current_lang == "zh" else "Vampiric Aura", 25],
 	]
 	all_attacks.shuffle()
 	
-	for i in range(min(2, all_attacks.size())):
+	for i in range(min(3, all_attacks.size())):
 		var atk = all_attacks[i]
 		var atk_id: String = atk[0]
 		var atk_name: String = atk[1]
@@ -1228,6 +1592,186 @@ func _open_shop():
 		_start_wave(current_wave + 1)
 	)
 	main_vbox.add_child(continue_btn)
+
+# === PAUSE MENU ===
+
+func _pause_game():
+	if is_paused:
+		return
+	is_paused = true
+	get_tree().paused = true
+	
+	_pause_layer = CanvasLayer.new()
+	_pause_layer.layer = 20
+	_pause_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_pause_layer)
+	
+	# Dark overlay
+	var overlay = ColorRect.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0, 0, 0, 0.75)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_pause_layer.add_child(overlay)
+	
+	# Center panel
+	var panel = PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.custom_minimum_size = Vector2(320, 340)
+	panel.position = Vector2(-160, -170)
+	overlay.add_child(panel)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	panel.add_child(margin)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	margin.add_child(vbox)
+	
+	# Title
+	var title = Label.new()
+	title.text = Loc.t("pause_title")
+	title.add_theme_font_size_override("font_size", 26)
+	title.add_theme_color_override("font_color", Color(1, 0.9, 0.5))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title)
+	
+	var sep = HSeparator.new()
+	vbox.add_child(sep)
+	
+	# Resume
+	var resume_btn = Button.new()
+	resume_btn.text = Loc.t("pause_resume")
+	resume_btn.add_theme_font_size_override("font_size", 18)
+	resume_btn.custom_minimum_size = Vector2(220, 44)
+	resume_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	resume_btn.pressed.connect(_resume_game)
+	vbox.add_child(resume_btn)
+	
+	# Settings row (fullscreen / language)
+	var settings_box = VBoxContainer.new()
+	settings_box.add_theme_constant_override("separation", 6)
+	vbox.add_child(settings_box)
+	
+	var settings_title = Label.new()
+	settings_title.text = Loc.t("settings")
+	settings_title.add_theme_font_size_override("font_size", 14)
+	settings_title.add_theme_color_override("font_color", Color(0.7, 0.65, 0.6))
+	settings_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_box.add_child(settings_title)
+	
+	# Display mode
+	var display_row = HBoxContainer.new()
+	display_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	display_row.add_theme_constant_override("separation", 8)
+	settings_box.add_child(display_row)
+	
+	var display_lbl = Label.new()
+	display_lbl.text = Loc.t("display_mode") + ":"
+	display_lbl.add_theme_font_size_override("font_size", 13)
+	display_row.add_child(display_lbl)
+	
+	var fs_btn = Button.new()
+	fs_btn.text = Loc.t("fullscreen")
+	fs_btn.add_theme_font_size_override("font_size", 12)
+	fs_btn.custom_minimum_size = Vector2(80, 28)
+	fs_btn.disabled = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+	display_row.add_child(fs_btn)
+	
+	var win_btn = Button.new()
+	win_btn.text = Loc.t("windowed")
+	win_btn.add_theme_font_size_override("font_size", 12)
+	win_btn.custom_minimum_size = Vector2(80, 28)
+	win_btn.disabled = DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_FULLSCREEN
+	display_row.add_child(win_btn)
+	
+	fs_btn.pressed.connect(func():
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		fs_btn.disabled = true; win_btn.disabled = false)
+	win_btn.pressed.connect(func():
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		fs_btn.disabled = false; win_btn.disabled = true)
+	
+	# Language
+	var lang_row = HBoxContainer.new()
+	lang_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	lang_row.add_theme_constant_override("separation", 8)
+	settings_box.add_child(lang_row)
+	
+	var lang_lbl = Label.new()
+	lang_lbl.text = Loc.t("language") + ":"
+	lang_lbl.add_theme_font_size_override("font_size", 13)
+	lang_row.add_child(lang_lbl)
+	
+	var zh_btn = Button.new()
+	zh_btn.text = "中文"
+	zh_btn.add_theme_font_size_override("font_size", 12)
+	zh_btn.custom_minimum_size = Vector2(60, 28)
+	zh_btn.disabled = Loc.current_lang == "zh"
+	lang_row.add_child(zh_btn)
+	
+	var en_btn = Button.new()
+	en_btn.text = "EN"
+	en_btn.add_theme_font_size_override("font_size", 12)
+	en_btn.custom_minimum_size = Vector2(60, 28)
+	en_btn.disabled = Loc.current_lang == "en"
+	lang_row.add_child(en_btn)
+	
+	var sep2 = HSeparator.new()
+	vbox.add_child(sep2)
+	
+	# Restart
+	var restart_btn = Button.new()
+	restart_btn.text = Loc.t("pause_restart")
+	restart_btn.add_theme_font_size_override("font_size", 16)
+	restart_btn.custom_minimum_size = Vector2(220, 40)
+	restart_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	restart_btn.pressed.connect(func():
+		get_tree().paused = false
+		GameState.reset_run()
+		GameState.run_mode = "survivor"
+		get_tree().change_scene_to_file("res://scenes/battle/survivor_arena.tscn"))
+	vbox.add_child(restart_btn)
+	
+	# Quit to menu
+	var quit_btn = Button.new()
+	quit_btn.text = Loc.t("pause_quit")
+	quit_btn.add_theme_font_size_override("font_size", 16)
+	quit_btn.add_theme_color_override("font_color", Color(0.8, 0.4, 0.35))
+	quit_btn.custom_minimum_size = Vector2(220, 40)
+	quit_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	quit_btn.pressed.connect(func():
+		get_tree().paused = false
+		SaveManager.save_meta()
+		get_tree().change_scene_to_file("res://scenes/main/main_menu.tscn"))
+	vbox.add_child(quit_btn)
+	
+	# Now connect language buttons (restart_btn / quit_btn are declared)
+	zh_btn.pressed.connect(func():
+		Loc.current_lang = "zh"; zh_btn.disabled = true; en_btn.disabled = false
+		title.text = Loc.t("pause_title")
+		resume_btn.text = Loc.t("pause_resume")
+		restart_btn.text = Loc.t("pause_restart")
+		quit_btn.text = Loc.t("pause_quit"))
+	en_btn.pressed.connect(func():
+		Loc.current_lang = "en"; zh_btn.disabled = false; en_btn.disabled = true
+		title.text = Loc.t("pause_title")
+		resume_btn.text = Loc.t("pause_resume")
+		restart_btn.text = Loc.t("pause_restart")
+		quit_btn.text = Loc.t("pause_quit"))
+
+func _resume_game():
+	if not is_paused:
+		return
+	is_paused = false
+	get_tree().paused = false
+	if _pause_layer and is_instance_valid(_pause_layer):
+		_pause_layer.queue_free()
+		_pause_layer = null
 
 # === HUD UPDATE ===
 

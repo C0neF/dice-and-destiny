@@ -23,6 +23,7 @@ var turn: int = 0
 var is_player_turn: bool = true
 var player_dodge_stacks: int = 0
 var player_reflect_ratio: float = 0.0
+var boss_phase: int = 1  # Track boss phase for transitions
 
 func _ready():
 	var hp_bg_style = StyleBoxFlat.new()
@@ -387,6 +388,7 @@ func _deal_damage_to_enemy(index: int, amount: int) -> int:
 		adjusted_amount = int(round(adjusted_amount * 1.5))
 	var actual = max(0, adjusted_amount - enemy.armor)
 	enemy.armor = max(0, enemy.armor - adjusted_amount)
+	var was_alive = enemy.hp > 0
 	enemy.hp = max(0, enemy.hp - actual)
 	var sprite = enemy.sprite
 	sprite.modulate = Color(3, 0.5, 0.5)
@@ -395,6 +397,14 @@ func _deal_damage_to_enemy(index: int, amount: int) -> int:
 	_spawn_damage_number(sprite.global_position + Vector2(0, -40), actual, Color(1, 0.3, 0.2))
 	if actual >= 8:
 		VFX.screen_shake(actual * 0.5, 6.0)
+	# Stat tracking
+	GameState.stats["damage_dealt"] = GameState.stats.get("damage_dealt", 0) + actual
+	if was_alive and enemy.hp <= 0:
+		GameState.stats["enemies_killed"] = GameState.stats.get("enemies_killed", 0) + 1
+		GameState.stats["total_enemies_killed"] = GameState.stats.get("total_enemies_killed", 0) + 1
+	# Boss phase transitions
+	if enemy.def.is_boss and enemy.hp > 0:
+		_check_boss_phase(enemy)
 	return actual
 
 func _apply_reflect(enemy_index: int, damage_taken: int):
@@ -408,6 +418,42 @@ func _apply_reflect(enemy_index: int, damage_taken: int):
 	var reflected = _deal_damage_to_enemy(enemy_index, reflect_damage)
 	if reflected > 0:
 		add_log(Loc.tf("reflect_hits", [reflected]))
+
+func _check_boss_phase(enemy: Dictionary):
+	var hp_pct = float(enemy.hp) / enemy.max_hp
+	var new_phase = 1
+	if hp_pct <= 0.25:
+		new_phase = 3
+	elif hp_pct <= 0.6:
+		new_phase = 2
+	
+	if new_phase > boss_phase:
+		boss_phase = new_phase
+		match new_phase:
+			2:
+				add_log(Loc.t("boss_phase2"))
+				VFX.screen_shake(8.0, 3.0)
+				VFX.flash_screen(Color(1, 0.2, 0.0, 0.4), 0.3)
+				# Boss gains strength + armor in phase 2
+				enemy["strength"] = enemy.get("strength", 0) + 5
+				enemy.armor += 10
+				# Visual: tint red
+				enemy.sprite.modulate = Color(1.2, 0.6, 0.6)
+				var tw = create_tween()
+				tw.tween_property(enemy.sprite, "modulate", Color(1.1, 0.8, 0.8), 1.0)
+			3:
+				add_log(Loc.t("boss_phase3"))
+				VFX.screen_shake(12.0, 2.0)
+				VFX.flash_screen(Color(0.8, 0.0, 0.0, 0.6), 0.5)
+				# Boss massive buff in phase 3
+				enemy["strength"] = enemy.get("strength", 0) + 8
+				# Poison player
+				GameState.poison_stacks += 3
+				# Visual: dark aura
+				enemy.sprite.modulate = Color(1.5, 0.3, 0.3)
+				var tw2 = create_tween().set_loops(20)
+				tw2.tween_property(enemy.sprite, "modulate", Color(1.5, 0.3, 0.3), 0.5)
+				tw2.tween_property(enemy.sprite, "modulate", Color(1.0, 0.5, 0.5), 0.5)
 
 func _spawn_damage_number(pos: Vector2, value: int, color: Color):
 	var label = Label.new()
