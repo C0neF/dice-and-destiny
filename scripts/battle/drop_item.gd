@@ -17,8 +17,8 @@ var sprite: ColorRect
 var glow: ColorRect
 
 # Arena bounds (set by SurvivorArena)
-var arena_min: Vector2 = Vector2(-10, 22)
-var arena_max: Vector2 = Vector2(650, 358)
+var arena_min: Vector2 = Vector2(-22, 22)
+var arena_max: Vector2 = Vector2(662, 368)
 
 # Drop type configs: [color, size, label]
 const DROP_CONFIG = {

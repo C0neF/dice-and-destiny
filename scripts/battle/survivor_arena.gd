@@ -5,7 +5,8 @@ signal wave_complete(wave_num: int)
 signal run_over(victory: bool)
 
 const ARENA_SIZE = Vector2(640, 360)
-# Wall-interior bounds (matching the dungeon map walls)
+# Wall-interior bounds (matching survivor_arena_bg wall inner edges)
+# Top is already aligned; expand left/right/bottom outward to match the painted walls.
 const ARENA_MIN = Vector2(-10, 22)
 const ARENA_MAX = Vector2(650, 358)
 const SPAWN_MARGIN = 40.0

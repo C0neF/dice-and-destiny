@@ -7,8 +7,8 @@ signal died
 @export var move_speed: float = 120.0
 
 # Arena bounds (set by SurvivorArena after instantiation)
-var arena_min: Vector2 = Vector2(-10, 22)
-var arena_max: Vector2 = Vector2(650, 358)
+var arena_min: Vector2 = Vector2(-22, 22)
+var arena_max: Vector2 = Vector2(662, 368)
 
 var sprite: AnimatedSprite2D
 var hp_bar_bg: ColorRect

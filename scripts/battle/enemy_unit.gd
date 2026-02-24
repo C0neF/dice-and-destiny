@@ -14,8 +14,8 @@ var damage_cooldown: float = 0.0  # Prevent damage spam
 var flash_timer: float = 0.0
 
 # Arena bounds (set by SurvivorArena after instantiation)
-var arena_min: Vector2 = Vector2(-10, 22)
-var arena_max: Vector2 = Vector2(650, 358)
+var arena_min: Vector2 = Vector2(-22, 22)
+var arena_max: Vector2 = Vector2(662, 368)
 
 # Status
 var burn_stacks: int = 0
