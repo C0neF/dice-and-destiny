@@ -3,6 +3,7 @@ extends Control
 func _ready():
 	theme = ThemeGen.create_game_theme()
 	VFX.fade_in(0.5)
+	SFX.stop_bgm(1.5)  # Fade out battle BGM
 	$VBox/Title.text = Loc.t("game_over")
 	$VBox/RetryButton.text = Loc.t("retry")
 	$VBox/MenuButton.text = Loc.t("main_menu")
@@ -11,6 +12,7 @@ func _ready():
 	title.modulate.a = 0.0
 	var tw = create_tween()
 	tw.tween_property(title, "modulate:a", 1.0, 1.0).set_delay(0.3)
+	tw.tween_callback(func(): SFX.play("game_over"))
 	
 	# Insert run summary before buttons
 	var summary = _build_run_summary()

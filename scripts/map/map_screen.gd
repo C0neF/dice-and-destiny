@@ -37,6 +37,7 @@ func _ready():
 		legend.text = Loc.t("legend")
 	generate_map()
 	VFX.fade_in(0.3)
+	SFX.play_bgm("lobby")
 	
 	# Auto-save when entering map
 	SaveManager.save_run()
@@ -272,6 +273,7 @@ func _enter_battle(room):
 		if rewards.dice != "":
 			GameState.add_dice(rewards.dice)
 		battle_scene.queue_free()
+		SFX.play("coin")
 		
 		visible = true
 		$UI.visible = true
@@ -499,6 +501,7 @@ func _open_shop(room):
 				gold_lbl.text = Loc.tf("shop_gold", [GameState.player_gold])
 				btn.disabled = true
 				btn.text = _card_name(card_id) + " — " + Loc.t("shop_sold")
+				SFX.play("coin")
 		)
 	
 	# === RIGHT: Relics ===
@@ -566,6 +569,7 @@ func _open_shop(room):
 				gold_lbl.text = Loc.tf("shop_gold", [GameState.player_gold])
 				relic_btn.disabled = true
 				relic_btn.text = Loc.t(rdef.name_key) + " — " + Loc.t("shop_sold")
+				SFX.play("upgrade")
 		)
 	
 	# === Bottom actions ===
@@ -688,6 +692,7 @@ func _show_card_removal(room, on_done: Callable):
 func _open_treasure(room):
 	var gold = randi_range(15, 40)
 	GameState.add_gold(gold)
+	SFX.play("coin")
 	
 	var vbox = _create_popup(Loc.t("treasure_title"), 500, 420)
 	
@@ -866,6 +871,7 @@ func _open_rest(room):
 	
 	heal_btn.pressed.connect(func():
 		GameState.heal(heal_amount)
+		SFX.play("heal")
 		_close_popup_and_finish(room)
 	)
 	
@@ -947,6 +953,7 @@ func _show_card_upgrade(room):
 		
 		btn.pressed.connect(func():
 			GameState.upgrade_card(card_id)
+			SFX.play("upgrade")
 			_close_popup_and_finish(room)
 		)
 	

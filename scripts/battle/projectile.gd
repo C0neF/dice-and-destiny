@@ -33,8 +33,8 @@ func _ready():
 	# Projectile monitors layer 2 (enemies)
 	collision_layer = 0  # Projectile has no layer itself
 	collision_mask = 2   # Detect enemies on layer 2
-	monitoring = true
-	monitorable = false
+	set_deferred("monitoring", true)
+	set_deferred("monitorable", false)
 	
 	body_entered.connect(_on_body_entered)
 

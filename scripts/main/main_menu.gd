@@ -18,6 +18,12 @@ extends Control
 @onready var zh_btn = $SettingsPanel/VBox/LangRow/ZhBtn
 @onready var en_btn = $SettingsPanel/VBox/LangRow/EnBtn
 @onready var back_btn = $SettingsPanel/VBox/BackBtn
+@onready var volume_slider = $SettingsPanel/VBox/VolumeRow/VolumeSlider
+@onready var volume_label = $SettingsPanel/VBox/VolumeRow/VolumeLabel
+@onready var volume_value = $SettingsPanel/VBox/VolumeRow/VolumeValue
+@onready var bgm_slider = $SettingsPanel/VBox/BgmRow/BgmSlider
+@onready var bgm_label = $SettingsPanel/VBox/BgmRow/BgmLabel
+@onready var bgm_value = $SettingsPanel/VBox/BgmRow/BgmValue
 
 var title_time: float = 0.0
 var continue_btn: Button = null
@@ -38,6 +44,23 @@ func _ready():
 	zh_btn.pressed.connect(func(): _set_lang("zh"))
 	en_btn.pressed.connect(func(): _set_lang("en"))
 	back_btn.pressed.connect(_on_back)
+	
+	# Volume slider
+	volume_slider.value = SFX.sfx_volume * 100.0
+	volume_value.text = "%d%%" % int(volume_slider.value)
+	volume_slider.value_changed.connect(func(val):
+		SFX.set_volume(val / 100.0)
+		volume_value.text = "%d%%" % int(val)
+		SFX.play("ui_click")
+	)
+	
+	# BGM volume slider
+	bgm_slider.value = SFX.bgm_volume * 100.0
+	bgm_value.text = "%d%%" % int(bgm_slider.value)
+	bgm_slider.value_changed.connect(func(val):
+		SFX.set_bgm_volume(val / 100.0)
+		bgm_value.text = "%d%%" % int(val)
+	)
 	
 	settings_panel.visible = false
 	
@@ -65,6 +88,9 @@ func _ready():
 	modulate.a = 0.0
 	var tween = create_tween()
 	tween.tween_property(self, "modulate:a", 1.0, 0.8)
+	
+	# Play lobby BGM
+	SFX.play_bgm("lobby")
 
 func _process(delta):
 	title_time += delta
@@ -91,6 +117,10 @@ func _update_texts():
 	back_btn.text = Loc.t("back")
 	if continue_btn:
 		continue_btn.text = Loc.t("continue_run")
+	if volume_label:
+		volume_label.text = Loc.t("sfx_volume")
+	if bgm_label:
+		bgm_label.text = Loc.t("bgm_volume")
 	var meta_lbl = get_node_or_null("VBox/MetaLabel")
 	if meta_lbl:
 		meta_lbl.text = Loc.tf("meta_stats", [GameState.meta_total_runs, GameState.meta_best_floor])
@@ -133,6 +163,7 @@ func _on_settings():
 func _on_back():
 	settings_panel.visible = false
 	$VBox.visible = true
+	SaveManager.save_meta()  # Persist volume + language
 
 func _on_fullscreen():
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)

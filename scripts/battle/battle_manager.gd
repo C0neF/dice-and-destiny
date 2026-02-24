@@ -47,6 +47,7 @@ func _ready():
 	
 	_update_ui_texts()
 	VFX.fade_in(0.3)
+	SFX.play_bgm("battle")
 
 func _update_ui_texts():
 	hp_label.text = Loc.t("hp")
@@ -250,6 +251,8 @@ func _on_card_clicked(index: int):
 			add_log(Loc.t("not_enough_energy"))
 		return
 	
+	SFX.play("card_play")
+	
 	# Show combo if > 1
 	if result.combo_bonus > 0:
 		add_log(Loc.tf("combo_bonus", [GameState.combo_count, result.combo_bonus]))
@@ -298,6 +301,7 @@ func _apply_card_effect(card_def, value: int, dice_bonus: int, card_id: String =
 				add_log(Loc.t("dodge_ready"))
 			else:
 				GameState.add_armor(value)
+				SFX.play("shield")
 				add_log(Loc.tf("gains_armor", [_card_name(card_def), value, dice_bonus]))
 			if card_id == "mirror_shield":
 				player_reflect_ratio = 0.5
@@ -355,6 +359,7 @@ func _apply_card_effect(card_def, value: int, dice_bonus: int, card_id: String =
 				add_log(Loc.tf("regen", [value]))
 			else:
 				GameState.heal(value)
+				SFX.play("heal")
 				add_log(Loc.tf("healed", [value, dice_bonus]))
 		
 		GameData.CardType.DICE_BOOST:
@@ -362,6 +367,7 @@ func _apply_card_effect(card_def, value: int, dice_bonus: int, card_id: String =
 				GameState.reroll_dice()
 				for d in GameState.active_dice:
 					d.value = min(6, d.value + value)
+				SFX.play("dice_roll")
 				add_log(Loc.tf("reroll", [value]))
 				update_dice_display()
 			elif card_id == "loaded_dice":
@@ -397,6 +403,9 @@ func _deal_damage_to_enemy(index: int, amount: int) -> int:
 	_spawn_damage_number(sprite.global_position + Vector2(0, -40), actual, Color(1, 0.3, 0.2))
 	if actual >= 8:
 		VFX.screen_shake(actual * 0.5, 6.0)
+		SFX.play("hit_crit")
+	elif actual > 0:
+		SFX.play_varied("hit")
 	# Stat tracking
 	GameState.stats["damage_dealt"] = GameState.stats.get("damage_dealt", 0) + actual
 	if was_alive and enemy.hp <= 0:
@@ -434,6 +443,7 @@ func _check_boss_phase(enemy: Dictionary):
 				add_log(Loc.t("boss_phase2"))
 				VFX.screen_shake(8.0, 3.0)
 				VFX.flash_screen(Color(1, 0.2, 0.0, 0.4), 0.3)
+				SFX.play("boss_phase")
 				# Boss gains strength + armor in phase 2
 				enemy["strength"] = enemy.get("strength", 0) + 5
 				enemy.armor += 10
@@ -445,6 +455,7 @@ func _check_boss_phase(enemy: Dictionary):
 				add_log(Loc.t("boss_phase3"))
 				VFX.screen_shake(12.0, 2.0)
 				VFX.flash_screen(Color(0.8, 0.0, 0.0, 0.6), 0.5)
+				SFX.play("boss_phase")
 				# Boss massive buff in phase 3
 				enemy["strength"] = enemy.get("strength", 0) + 8
 				# Poison player
@@ -572,6 +583,7 @@ func _enemy_turn():
 					if actual > 0:
 						VFX.flash_screen(Color(1, 0.15, 0.1, 0.25), 0.15)
 						VFX.screen_shake(2.0, 8.0)
+						SFX.play("player_hurt")
 			GameData.IntentType.DEFEND:
 				enemy.armor += intent.value
 			GameData.IntentType.BUFF:

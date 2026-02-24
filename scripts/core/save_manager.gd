@@ -17,6 +17,8 @@ func save_meta():
 		"total_gold_earned": GameState.stats.get("total_gold_earned", 0),
 		"total_enemies_killed": GameState.stats.get("total_enemies_killed", 0),
 		"language": Loc.current_lang,
+		"sfx_volume": SFX.sfx_volume,
+		"bgm_volume": SFX.bgm_volume,
 	}
 	_write_json(META_PATH, data)
 
@@ -38,6 +40,8 @@ func load_meta():
 	var lang = data.get("language", "zh")
 	if lang in ["zh", "en"]:
 		Loc.current_lang = lang
+	SFX.sfx_volume = float(data.get("sfx_volume", 0.8))
+	SFX.bgm_volume = float(data.get("bgm_volume", 0.6))
 
 ## ============================================================
 ##  RUN SAVE (save / resume mid-run)

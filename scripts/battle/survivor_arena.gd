@@ -85,6 +85,7 @@ func _ready():
 	_setup_ui()
 	_start_wave(1)
 	VFX.fade_in(0.4)
+	SFX.play_bgm("battle")
 
 func _unhandled_input(event):
 	if event.is_action_pressed("ui_cancel"):
@@ -200,6 +201,8 @@ func _setup_player():
 	# Pass arena bounds so the player clamp uses shared constants
 	player.arena_min = ARENA_MIN
 	player.arena_max = ARENA_MAX
+	# Sync HP bar on spawn
+	player.update_hp_bar(GameState.player_hp, GameState.player_max_hp)
 	
 	camera = Camera2D.new()
 	camera.zoom = Vector2(2, 2)
@@ -358,6 +361,7 @@ func _start_wave(wave_num: int):
 	GameState.roll_all_dice()
 	current_dice_bonus = _calc_dice_bonus()
 	
+	SFX.play("wave_start")
 	add_log("[color=yellow]Wave %d![/color]" % wave_num)
 
 func _update_wave(delta):
@@ -435,6 +439,7 @@ func _get_enemy_pool() -> Array:
 
 func _on_enemy_died(_enemy, _pos: Vector2):
 	enemies_alive -= 1
+	SFX.play_varied("enemy_die")
 	# Spawn drops
 	_spawn_drops(_pos)
 	# Mimic: bonus gold + guaranteed health potion
@@ -477,35 +482,42 @@ func _create_drop(type: int, val: int, pos: Vector2):
 	pos.y = clampf(pos.y, ARENA_MIN.y + 8, ARENA_MAX.y - 8)
 	var drop = Area2D.new()
 	drop.set_script(DropItemScript)
-	drop_container.add_child(drop)
+	# setup BEFORE add_child so _ready() sees the correct drop_type
+	drop.setup(type, val, player, pos)
 	drop.arena_min = ARENA_MIN
 	drop.arena_max = ARENA_MAX
-	drop.setup(type, val, player, pos)
+	drop_container.add_child(drop)
 	drop.collected.connect(_on_drop_collected)
 
 func _on_drop_collected(drop_type: int, value: int):
 	match drop_type:
 		0:  # GOLD
 			GameState.add_gold(value)
+			SFX.play_varied("coin")
 			add_log("[color=yellow]+%dG[/color]" % value)
 		1:  # HEALTH_POTION
 			GameState.heal(value)
+			SFX.play("heal")
 			add_log("[color=green]+%d HP[/color]" % value)
 			VFX.flash_screen(Color(0.1, 0.9, 0.2, 0.15), 0.15)
 		2:  # SPEED_BOOST
 			speed_boost_timer = float(value)
 			player.move_speed = 180.0
+			SFX.play("powerup")
 			add_log("[color=cyan]⚡ Speed Boost![/color]")
 		3:  # DAMAGE_BOOST
 			damage_boost_timer = float(value)
+			SFX.play("powerup")
 			add_log("[color=orange]🔥 Damage Boost![/color]")
 		4:  # ENERGY_ORB
 			GameState.player_energy = min(GameState.player_max_energy, GameState.player_energy + value)
+			SFX.play("powerup")
 			add_log("[color=blue]+%d Energy[/color]" % value)
 		5:  # MAGNET
 			magnet_active = true
 			magnet_timer = float(value)
 			_activate_all_magnets()
+			SFX.play("powerup")
 			add_log("[color=white]🧲 Magnet![/color]")
 		6:  # BOMB
 			_detonate_bomb(player.global_position)
@@ -529,6 +541,7 @@ func _detonate_bomb(center: Vector2):
 				e.take_damage(bomb_damage, kb)
 	VFX.flash_screen(Color(1, 0.5, 0.0, 0.4), 0.25)
 	VFX.screen_shake(6.0, 4.0)
+	SFX.play("explosion")
 	# Visual explosion ring
 	_spawn_explosion_ring(center, 150.0, Color(1, 0.4, 0.0))
 
@@ -605,6 +618,7 @@ func _update_dice(delta):
 		dice_timer = 0
 		GameState.roll_all_dice()
 		current_dice_bonus = _calc_dice_bonus()
+		SFX.play("dice_roll")
 		add_log("[color=cyan]🎲 Dice rolled! Bonus: +%d[/color]" % current_dice_bonus)
 
 func _calc_dice_bonus() -> int:
@@ -836,6 +850,7 @@ func _fire_chain_lightning(lvl: int):
 		current = next
 	
 	VFX.flash_screen(Color(0.4, 0.6, 1.0, 0.15), 0.08)
+	SFX.play("lightning")
 	add_log("[color=cyan]⚡ Chain Lightning x%d[/color]" % hit.size())
 
 func _spawn_lightning_line(from: Vector2, to: Vector2):
@@ -919,6 +934,7 @@ func _spawn_flame_tornado(lvl: int):
 	)
 	
 	VFX.flash_screen(Color(1, 0.3, 0.0, 0.12), 0.1)
+	SFX.play("fire")
 	add_log("[color=orange]🌪️ Flame Tornado![/color]")
 
 ## Ice nova - freezes and damages nearby enemies
@@ -938,6 +954,7 @@ func _fire_ice_nova(lvl: int):
 	# Visual: expanding ring
 	_spawn_explosion_ring(player.global_position, radius, Color(0.3, 0.6, 1.0))
 	VFX.flash_screen(Color(0.3, 0.5, 1.0, 0.2), 0.12)
+	SFX.play("freeze")
 	add_log("[color=aqua]❄️ Ice Nova! Froze %d[/color]" % enemies.size())
 
 ## Poison cloud - damages and poisons enemies near player
@@ -988,6 +1005,7 @@ func _drop_meteors(lvl: int):
 		_spawn_meteor(impact_pos, dmg, radius, delay)
 	
 	add_log("[color=red]☄️ Meteor x%d![/color]" % count)
+	SFX.play("explosion", 0.7)
 
 func _spawn_meteor(pos: Vector2, dmg: int, radius: float, delay: float):
 	# Warning indicator
@@ -1114,6 +1132,7 @@ func _trigger_earthquake(lvl: int):
 	
 	VFX.screen_shake(6.0 + lvl, 4.0)
 	VFX.flash_screen(Color(0.6, 0.4, 0.1, 0.2), 0.15)
+	SFX.play("explosion")
 	
 	# Expanding ring visual + damage
 	var ring = Node2D.new()
@@ -1268,6 +1287,7 @@ func _use_card(slot: int):
 	value += combo_bonus
 	
 	# Execute card effect
+	SFX.play("card_play")
 	_execute_card(card_id, card_def, value)
 	
 	add_log("%s → %d" % [_card_name(card_id, card_def), value])
@@ -1381,6 +1401,7 @@ func _check_contact_damage():
 				if actual > 0:
 					VFX.flash_screen(Color(1, 0.1, 0.05, 0.3), 0.1)
 					VFX.screen_shake(3.0, 6.0)
+					SFX.play("player_hurt")
 					player.update_hp_bar(GameState.player_hp, GameState.player_max_hp)
 				
 				if GameState.is_dead():
@@ -1481,7 +1502,7 @@ func _open_shop():
 				gold_lbl.text = "Gold: %d" % GameState.player_gold
 				btn.disabled = true
 				btn.text += " ✓"
-		)
+				SFX.play("coin")		)
 		left_col.add_child(btn)
 	
 	# Right: actions
@@ -1507,6 +1528,7 @@ func _open_shop():
 			GameState.upgrade_card(to_upgrade)
 			gold_lbl.text = "Gold: %d" % GameState.player_gold
 			upgrade_btn.text += " ✓"
+			SFX.play("upgrade")
 	)
 	right_col.add_child(upgrade_btn)
 	
@@ -1572,6 +1594,7 @@ func _open_shop():
 				gold_lbl.text = "Gold: %d" % GameState.player_gold
 				atk_btn.disabled = true
 				atk_btn.text += " ✓"
+				SFX.play("powerup")
 		)
 		right_col.add_child(atk_btn)
 	
@@ -1721,6 +1744,66 @@ func _pause_game():
 	en_btn.disabled = Loc.current_lang == "en"
 	lang_row.add_child(en_btn)
 	
+	# Volume slider
+	var vol_row = HBoxContainer.new()
+	vol_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	vol_row.add_theme_constant_override("separation", 8)
+	settings_box.add_child(vol_row)
+	
+	var vol_lbl = Label.new()
+	vol_lbl.text = Loc.t("sfx_volume") + ":"
+	vol_lbl.add_theme_font_size_override("font_size", 13)
+	vol_row.add_child(vol_lbl)
+	
+	var vol_slider = HSlider.new()
+	vol_slider.custom_minimum_size = Vector2(120, 20)
+	vol_slider.min_value = 0.0
+	vol_slider.max_value = 100.0
+	vol_slider.step = 5.0
+	vol_slider.value = SFX.sfx_volume * 100.0
+	vol_row.add_child(vol_slider)
+	
+	var vol_val = Label.new()
+	vol_val.text = "%d%%" % int(vol_slider.value)
+	vol_val.add_theme_font_size_override("font_size", 12)
+	vol_val.custom_minimum_size = Vector2(36, 0)
+	vol_row.add_child(vol_val)
+	
+	vol_slider.value_changed.connect(func(val):
+		SFX.set_volume(val / 100.0)
+		vol_val.text = "%d%%" % int(val)
+	)
+	
+	# BGM volume slider
+	var bgm_row = HBoxContainer.new()
+	bgm_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	bgm_row.add_theme_constant_override("separation", 8)
+	settings_box.add_child(bgm_row)
+	
+	var bgm_lbl = Label.new()
+	bgm_lbl.text = Loc.t("bgm_volume") + ":"
+	bgm_lbl.add_theme_font_size_override("font_size", 13)
+	bgm_row.add_child(bgm_lbl)
+	
+	var bgm_slider = HSlider.new()
+	bgm_slider.custom_minimum_size = Vector2(120, 20)
+	bgm_slider.min_value = 0.0
+	bgm_slider.max_value = 100.0
+	bgm_slider.step = 5.0
+	bgm_slider.value = SFX.bgm_volume * 100.0
+	bgm_row.add_child(bgm_slider)
+	
+	var bgm_val = Label.new()
+	bgm_val.text = "%d%%" % int(bgm_slider.value)
+	bgm_val.add_theme_font_size_override("font_size", 12)
+	bgm_val.custom_minimum_size = Vector2(36, 0)
+	bgm_row.add_child(bgm_val)
+	
+	bgm_slider.value_changed.connect(func(val):
+		SFX.set_bgm_volume(val / 100.0)
+		bgm_val.text = "%d%%" % int(val)
+	)
+	
 	var sep2 = HSeparator.new()
 	vbox.add_child(sep2)
 	
@@ -1769,6 +1852,7 @@ func _resume_game():
 		return
 	is_paused = false
 	get_tree().paused = false
+	SaveManager.save_meta()  # Persist volume setting
 	if _pause_layer and is_instance_valid(_pause_layer):
 		_pause_layer.queue_free()
 		_pause_layer = null

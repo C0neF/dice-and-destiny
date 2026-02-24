@@ -50,14 +50,14 @@ func _ready():
 	
 	# HP bar above player
 	hp_bar_bg = ColorRect.new()
-	hp_bar_bg.size = Vector2(20, 3)
-	hp_bar_bg.position = Vector2(-10, -20)
+	hp_bar_bg.size = Vector2(24, 3)
+	hp_bar_bg.position = Vector2(-12, -20)
 	hp_bar_bg.color = Color(0.2, 0.1, 0.1)
 	add_child(hp_bar_bg)
 	
 	hp_bar_fill = ColorRect.new()
-	hp_bar_fill.size = Vector2(20, 3)
-	hp_bar_fill.position = Vector2(-10, -20)
+	hp_bar_fill.size = Vector2(24, 3)
+	hp_bar_fill.position = Vector2(-12, -20)
 	hp_bar_fill.color = Color(0.1, 0.8, 0.2)
 	add_child(hp_bar_fill)
 	
@@ -106,6 +106,16 @@ func _physics_process(_delta):
 	position.x = clampf(position.x, arena_min.x, arena_max.x)
 	position.y = clampf(position.y, arena_min.y, arena_max.y)
 
+const HP_BAR_WIDTH = 24.0
+
 func update_hp_bar(current: int, maximum: int):
 	if hp_bar_fill:
-		hp_bar_fill.size.x = 20.0 * current / max(1, maximum)
+		var ratio = float(current) / float(max(1, maximum))
+		hp_bar_fill.size.x = HP_BAR_WIDTH * ratio
+		# Color shift: green → yellow → red
+		if ratio > 0.5:
+			hp_bar_fill.color = Color(0.1, 0.8, 0.2)
+		elif ratio > 0.25:
+			hp_bar_fill.color = Color(0.9, 0.75, 0.1)
+		else:
+			hp_bar_fill.color = Color(0.9, 0.15, 0.1)

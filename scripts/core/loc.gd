@@ -258,6 +258,8 @@ var strings: Dictionary = {
 		"pause_resume": "▶ 继续游戏",
 		"pause_restart": "🔄 重新开始",
 		"pause_quit": "🚪 退出到主菜单",
+		"sfx_volume": "🔊 音效",
+		"bgm_volume": "🎵 音乐",
 	},
 	"en": {
 		"title": "DICE & DESTINY",
@@ -513,6 +515,8 @@ var strings: Dictionary = {
 		"pause_resume": "▶ Resume",
 		"pause_restart": "🔄 Restart",
 		"pause_quit": "🚪 Quit to Menu",
+		"sfx_volume": "🔊 SFX",
+		"bgm_volume": "🎵 Music",
 	}
 }
 
