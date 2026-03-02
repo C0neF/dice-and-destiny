@@ -23,6 +23,7 @@ const HP_BAR_WIDTH = 28.0
 var anim_frames: SpriteFrames
 var using_duelyst_player: bool = false
 var _last_hp: int = -1
+var _facing_dir: Vector2 = Vector2.RIGHT
 
 func _ready():
 	anim_frames = _build_player_spriteframes()
@@ -120,6 +121,7 @@ func _physics_process(_delta):
 	
 	if input.length() > 0:
 		input = input.normalized()
+		_facing_dir = input
 		if using_duelyst_player:
 			sprite.play(_pick_anim(["run", "walk", "move", "walk_side", "walk_down", "walk_up", "idle"]))
 			sprite.flip_h = input.x < -0.05
@@ -144,6 +146,11 @@ func _physics_process(_delta):
 	# but this prevents tunneling at extreme speeds or edge cases.
 	position.x = clampf(position.x, arena_min.x, arena_max.x)
 	position.y = clampf(position.y, arena_min.y, arena_max.y)
+
+func get_facing_direction() -> Vector2:
+	if _facing_dir.length() <= 0.01:
+		return Vector2.RIGHT
+	return _facing_dir.normalized()
 
 func _on_animation_finished() -> void:
 	if not sprite:

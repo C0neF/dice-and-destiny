@@ -319,13 +319,13 @@ func _card_desc(card_id: String, card_def = null) -> String:
 	var zh_desc_map = {
 		"strike": "造成 {value} 点伤害",
 		"heavy_strike": "造成 {value} 点伤害",
-		"block": "获得 {value} 点护甲",
+		"block": "向面朝方向闪现一段距离（冷却30秒）",
 		"fortress": "获得 {value} 点护甲",
 		"fireball": "对全体造成 {value} 点魔法伤害",
 		"ice_shard": "造成 {value} 点伤害并冻结 1 回合",
 		"heal": "恢复 {value} 点生命",
 		"regenerate": "3 回合内每回合恢复 {value} 点生命",
-		"lucky_roll": "重掷所有骰子并使每颗 +{value}",
+		"lucky_roll": "随机触发：斩击 / 闪现 / 治疗（冷却40秒）",
 		"loaded_dice": "将一颗骰子固定为 6",
 		"poison_strike": "造成 {value} 点伤害并附加 2 层中毒",
 		"mirror_shield": "获得 {value} 点护甲并反弹 50% 下次伤害",
@@ -1263,6 +1263,72 @@ func _spawn_mage_cast_fx(pos: Vector2, color: Color = MAGE_COLOR_PRIMARY):
 		ray_tw.tween_property(ray, "modulate:a", 0.0, 0.12)
 		ray_tw.tween_callback(ray.queue_free)
 
+func _player_blink(distance: float = 110.0):
+	if not is_instance_valid(player):
+		return
+	
+	var dir = Vector2.RIGHT
+	if player.has_method("get_facing_direction"):
+		dir = player.get_facing_direction()
+	elif player.velocity.length() > 0.01:
+		dir = player.velocity.normalized()
+	if dir.length() <= 0.01:
+		dir = Vector2.RIGHT
+	
+	var from_pos = player.position
+	var target = from_pos + dir.normalized() * distance
+	target.x = clampf(target.x, ARENA_MIN.x + 6.0, ARENA_MAX.x - 6.0)
+	target.y = clampf(target.y, ARENA_MIN.y + 6.0, ARENA_MAX.y - 6.0)
+	player.position = target
+	
+	# Blink trail
+	var trail = Line2D.new()
+	trail.width = 2.2
+	trail.default_color = Color(0.72, 0.5, 1.0, 0.75)
+	trail.z_index = 16
+	trail.add_point(from_pos)
+	trail.add_point((from_pos + target) * 0.5 + Vector2(randf_range(-4, 4), randf_range(-4, 4)))
+	trail.add_point(target)
+	add_child(trail)
+	var tw = trail.create_tween()
+	tw.tween_property(trail, "modulate:a", 0.0, 0.16)
+	tw.tween_callback(trail.queue_free)
+	
+	VFX.flash_screen(Color(0.68, 0.55, 1.0, 0.14), 0.06)
+	SFX.play("powerup")
+
+func _player_circle_slash(damage: int, radius: float = 90.0, color: Color = MAGE_COLOR_PRIMARY):
+	# Damage enemies around player center
+	for e in enemy_container.get_children():
+		if not e.has_method("take_damage"):
+			continue
+		var dist = e.global_position.distance_to(player.global_position)
+		if dist <= radius:
+			var kb = (e.global_position - player.global_position).normalized()
+			e.take_damage(damage, kb)
+	
+	# Circular slash visual (expand from player center, not projectile-like)
+	var ring = Line2D.new()
+	ring.width = 2.6
+	ring.default_color = Color(color.r, color.g, color.b, 0.92)
+	ring.z_index = 18
+	ring.position = player.global_position
+	var seg = 28
+	var final_r = radius * 0.95  # keep overall visual size close to current
+	for i in range(seg + 1):
+		var a = TAU * float(i) / float(seg)
+		ring.add_point(Vector2(cos(a), sin(a)) * final_r)
+	ring.scale = Vector2(0.12, 0.12)
+	add_child(ring)
+	
+	var tw = ring.create_tween()
+	tw.tween_property(ring, "scale", Vector2.ONE, 0.14)
+	tw.parallel().tween_property(ring, "modulate:a", 0.0, 0.15)
+	tw.tween_callback(ring.queue_free)
+	
+	VFX.flash_screen(Color(color.r, color.g, color.b, 0.15), 0.08)
+	SFX.play("hit")
+
 func _create_projectile(from: Vector2, dir: Vector2, dmg: int, spd: float = 200.0) -> Node2D:
 	_spawn_mage_cast_fx(from + dir * 8.0, MAGE_COLOR_PRIMARY)
 	var proj = Area2D.new()
@@ -1310,8 +1376,13 @@ func _use_card(slot: int):
 	if not GameState.spend_energy(card_def.energy_cost):
 		return
 	
-	# Set cooldown (based on energy cost)
-	card_cooldowns[card_id] = 2.0 + card_def.energy_cost * 1.5
+	# Set cooldown
+	if card_id == "block":
+		card_cooldowns[card_id] = 30.0
+	elif card_id == "lucky_roll":
+		card_cooldowns[card_id] = 40.0
+	else:
+		card_cooldowns[card_id] = 2.0 + card_def.energy_cost * 1.5
 	
 	# Calculate value
 	var value = card_def.base_value + int(current_dice_bonus * card_def.dice_multiplier * 0.5)
@@ -1338,31 +1409,40 @@ func _execute_card(card_id: String, card_def, value: int):
 	
 	match card_def.type:
 		GameData.CardType.ATTACK:
-			if nearest:
-				var attack_value = GameState.apply_damage_with_relics(value)
-				var dir = (nearest.global_position - player.global_position).normalized()
-				match card_id:
-					"flurry":
-						for i in range(3):
-							var spread = dir.rotated(deg_to_rad(-10 + i * 10))
-							var p = _create_projectile(player.global_position, spread, attack_value / 3, 220)
-							p.setup_visual(MAGE_COLOR_SECONDARY, 3)
-					"vampiric_strike":
-						var p = _create_projectile(player.global_position, dir, attack_value, 200)
-						p.setup_visual(Color(0.86, 0.28, 0.78), 5)
-						GameState.heal(attack_value / 3)
-					"poison_strike":
-						var p = _create_projectile(player.global_position, dir, attack_value, 180)
-						p.status_effect = "poison"
-						p.status_stacks = 3
-						p.setup_visual(Color(0.45, 1.0, 0.65), 4)
-					_:
-						var p = _create_projectile(player.global_position, dir, attack_value, 200)
-						p.setup_visual(MAGE_COLOR_PRIMARY, 4)
+			var attack_value = GameState.apply_damage_with_relics(value)
+			match card_id:
+				"strike":
+					_player_circle_slash(attack_value, 88.0, Color(1.0, 0.82, 0.55, 0.95))
+				"heavy_strike":
+					_player_circle_slash(attack_value, 104.0, Color(1.0, 0.68, 0.35, 0.95))
+				_:
+					if nearest:
+						var dir = (nearest.global_position - player.global_position).normalized()
+						match card_id:
+							"flurry":
+								for i in range(3):
+									var spread = dir.rotated(deg_to_rad(-10 + i * 10))
+									var p = _create_projectile(player.global_position, spread, attack_value / 3, 220)
+									p.setup_visual(MAGE_COLOR_SECONDARY, 3)
+							"vampiric_strike":
+								var p = _create_projectile(player.global_position, dir, attack_value, 200)
+								p.setup_visual(Color(0.86, 0.28, 0.78), 5)
+								GameState.heal(attack_value / 3)
+							"poison_strike":
+								var p = _create_projectile(player.global_position, dir, attack_value, 180)
+								p.status_effect = "poison"
+								p.status_stacks = 3
+								p.setup_visual(Color(0.45, 1.0, 0.65), 4)
+							_:
+								var p = _create_projectile(player.global_position, dir, attack_value, 200)
+								p.setup_visual(MAGE_COLOR_PRIMARY, 4)
 		
 		GameData.CardType.DEFEND:
-			GameState.add_armor(value)
-			VFX.flash_screen(Color(0.45, 0.55, 1.0, 0.16), 0.1)
+			if card_id == "block":
+				_player_blink(110.0)
+			else:
+				GameState.add_armor(value)
+				VFX.flash_screen(Color(0.45, 0.55, 1.0, 0.16), 0.1)
 		
 		GameData.CardType.MAGIC:
 			match card_id:
@@ -1415,9 +1495,34 @@ func _execute_card(card_id: String, card_def, value: int):
 			VFX.flash_screen(Color(0.2, 1, 0.3, 0.15), 0.1)
 		
 		GameData.CardType.DICE_BOOST:
-			GameState.roll_all_dice()
-			current_dice_bonus = _calc_dice_bonus()
-			add_log("[color=cyan]🎲 Rerolled! +%d[/color]" % current_dice_bonus)
+			match card_id:
+				"lucky_roll":
+					var lucky_mode = randi() % 3
+					match lucky_mode:
+						0:
+							var slash_damage = GameState.apply_damage_with_relics(max(4, value))
+							_player_circle_slash(slash_damage, 92.0, Color(1.0, 0.82, 0.55, 0.95))
+							add_log("[color=yellow]🎲 幸运骰：斩击[/color]" if Loc.current_lang == "zh" else "[color=yellow]🎲 Lucky Roll: Slash[/color]")
+						1:
+							_player_blink(120.0)
+							add_log("[color=violet]🎲 幸运骰：闪现[/color]" if Loc.current_lang == "zh" else "[color=violet]🎲 Lucky Roll: Blink[/color]")
+						_:
+							var heal_amount = max(4, value)
+							GameState.heal(heal_amount)
+							if is_instance_valid(player):
+								player.update_hp_bar(GameState.player_hp, GameState.player_max_hp)
+							VFX.flash_screen(Color(0.2, 1.0, 0.35, 0.18), 0.1)
+							add_log("[color=green]🎲 幸运骰：治疗 +%d[/color]" % heal_amount if Loc.current_lang == "zh" else "[color=green]🎲 Lucky Roll: Heal +%d[/color]" % heal_amount)
+				"loaded_dice":
+					if GameState.active_dice.size() > 0:
+						var pick = randi() % GameState.active_dice.size()
+						GameState.active_dice[pick].value = 6
+						current_dice_bonus = _calc_dice_bonus()
+						add_log("[color=cyan]🎲 灌铅骰：一颗骰子固定为6[/color]" if Loc.current_lang == "zh" else "[color=cyan]🎲 Loaded Dice: one die set to 6[/color]")
+				_:
+					GameState.roll_all_dice()
+					current_dice_bonus = _calc_dice_bonus()
+					add_log("[color=cyan]🎲 Rerolled! +%d[/color]" % current_dice_bonus)
 
 func _update_card_cooldowns(delta):
 	for card_id in card_cooldowns:
@@ -1461,239 +1566,467 @@ func _on_player_died():
 func _open_shop():
 	is_shopping = true
 	
-	# Dark overlay
+	# Full-screen dark overlay
 	var overlay = ColorRect.new()
 	overlay.name = "ShopOverlay"
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay.color = Color(0, 0, 0, 0.6)
+	overlay.color = Color(0, 0, 0, 0.72)
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	hud.add_child(overlay)
 	
-	# Shop panel - centered
+	# Main responsive panel
 	var shop_panel = PanelContainer.new()
 	shop_panel.name = "ShopPanel"
 	shop_panel.set_anchors_preset(Control.PRESET_CENTER)
-	shop_panel.custom_minimum_size = Vector2(500, 360)
-	shop_panel.position = Vector2(-250, -180)
+	var vp = get_viewport_rect().size
+	var panel_size = Vector2(
+		clampf(vp.x * 0.94, 560.0, 980.0),
+		clampf(vp.y * 0.92, 520.0, 700.0)
+	)
+	shop_panel.custom_minimum_size = panel_size
+	shop_panel.position = -panel_size * 0.5
 	overlay.add_child(shop_panel)
 	
 	var margin = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_right", 20)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_bottom", 16)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
 	shop_panel.add_child(margin)
 	
-	var main_vbox = VBoxContainer.new()
-	main_vbox.add_theme_constant_override("separation", 10)
-	margin.add_child(main_vbox)
+	var root = VBoxContainer.new()
+	root.add_theme_constant_override("separation", 10)
+	margin.add_child(root)
 	
 	# Header
 	var header = HBoxContainer.new()
-	main_vbox.add_child(header)
+	header.alignment = BoxContainer.ALIGNMENT_CENTER
+	root.add_child(header)
+	
+	var title_box = VBoxContainer.new()
+	title_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title_box)
 	
 	var title = Label.new()
-	title.text = Loc.t("shop") + " - Wave %d" % current_wave
-	title.add_theme_font_size_override("font_size", 22)
-	title.add_theme_color_override("font_color", Color(1, 0.9, 0.4))
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(title)
+	title.text = ("🛒 商店" if Loc.current_lang == "zh" else "🛒 Shop")
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(1, 0.9, 0.45))
+	title_box.add_child(title)
+	
+	var sub = Label.new()
+	sub.text = (("第 %d 波结束 · 选择你的强化" if Loc.current_lang == "zh" else "Wave %d cleared · Choose your upgrades") % current_wave)
+	sub.add_theme_font_size_override("font_size", 13)
+	sub.add_theme_color_override("font_color", Color(0.75, 0.78, 0.88))
+	title_box.add_child(sub)
 	
 	var gold_lbl = Label.new()
-	gold_lbl.text = "Gold: %d" % GameState.player_gold
-	gold_lbl.add_theme_font_size_override("font_size", 18)
+	gold_lbl.add_theme_font_size_override("font_size", 20)
 	gold_lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.2))
 	header.add_child(gold_lbl)
 	
-	# Two columns
-	var columns = HBoxContainer.new()
-	columns.add_theme_constant_override("separation", 20)
-	main_vbox.add_child(columns)
+	var reroll_btn = Button.new()
+	reroll_btn.custom_minimum_size = Vector2(150, 36)
+	reroll_btn.add_theme_font_size_override("font_size", 13)
+	header.add_child(reroll_btn)
 	
-	# Hover description (shop tips)
-	var default_tip = "将鼠标移到选项上查看作用说明。" if Loc.current_lang == "zh" else "Hover over an option to see what it does."
-	var tip_label = Label.new()
-	tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tip_label.custom_minimum_size = Vector2(0, 46)
-	tip_label.text = default_tip
-	tip_label.add_theme_font_size_override("font_size", 13)
-	tip_label.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95))
+	root.add_child(HSeparator.new())
 	
-	var bind_shop_tip = func(ctrl: Control, tip_text: String):
-		ctrl.mouse_entered.connect(func():
-			tip_label.text = tip_text
-		)
-		ctrl.mouse_exited.connect(func():
-			tip_label.text = default_tip
-		)
+	# Body: product wall (3 horizontal columns)
+	var body = HBoxContainer.new()
+	body.add_theme_constant_override("separation", 12)
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(body)
 	
-	# Left: card offers
-	var left_col = VBoxContainer.new()
-	left_col.add_theme_constant_override("separation", 6)
-	left_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	columns.add_child(left_col)
+	var product_panel = PanelContainer.new()
+	product_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	product_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(product_panel)
 	
-	var cards_title = Label.new()
-	cards_title.text = Loc.t("survivor_mode") if Loc.current_lang == "zh" else "Buy Cards"
-	cards_title.text = "购买卡牌" if Loc.current_lang == "zh" else "Buy Cards"
-	cards_title.add_theme_font_size_override("font_size", 16)
-	cards_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.9))
-	left_col.add_child(cards_title)
+	var product_margin = MarginContainer.new()
+	product_margin.add_theme_constant_override("margin_left", 10)
+	product_margin.add_theme_constant_override("margin_right", 10)
+	product_margin.add_theme_constant_override("margin_top", 10)
+	product_margin.add_theme_constant_override("margin_bottom", 10)
+	product_panel.add_child(product_margin)
 	
-	var all_cards = GameData.CARDS.keys()
-	var offered: Array[String] = []
+	var product_root = VBoxContainer.new()
+	product_root.add_theme_constant_override("separation", 8)
+	product_margin.add_child(product_root)
+	
+	var products_title = Label.new()
+	products_title.text = ("商品列表" if Loc.current_lang == "zh" else "Products")
+	products_title.add_theme_font_size_override("font_size", 16)
+	products_title.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	product_root.add_child(products_title)
+	
+	var product_row = HBoxContainer.new()
+	product_row.add_theme_constant_override("separation", 10)
+	product_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	product_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	product_root.add_child(product_row)
+	
+	# Horizontal layout: 3 columns, each column holds up to 3 cards.
+	var col_width = clampf((panel_size.x - 120.0) / 3.0, 210.0, 320.0)
+	var shop_columns: Array = []
 	for i in range(3):
-		offered.append(all_cards[randi() % all_cards.size()])
+		var col = VBoxContainer.new()
+		col.add_theme_constant_override("separation", 8)
+		col.custom_minimum_size = Vector2(col_width, 0)
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		product_row.add_child(col)
+		shop_columns.append(col)
 	
-	for i in range(3):
-		var card_def = GameData.CARDS.get(offered[i])
-		if not card_def: continue
-		var card_id = offered[i]
-		var cost = 10 + card_def.energy_cost * 5
-		var btn = Button.new()
-		btn.text = "%s (%d⚡) - %dG" % [_card_name(card_id, card_def), card_def.energy_cost, cost]
-		btn.custom_minimum_size = Vector2(220, 36)
-		btn.add_theme_font_size_override("font_size", 14)
-		btn.pressed.connect(func():
-			if GameState.player_gold >= cost:
-				GameState.player_gold -= cost
-				GameState.add_card_to_deck(card_id)
-				gold_lbl.text = "Gold: %d" % GameState.player_gold
-				btn.disabled = true
-				btn.text += " ✓"
-				SFX.play("coin")		)
-		var card_tip = (("加入卡组。效果：" if Loc.current_lang == "zh" else "Adds to your deck. Effect: ") + _card_desc(card_id, card_def))
-		bind_shop_tip.call(btn, card_tip)
-		left_col.add_child(btn)
+	# Make 3 rows fit without scrolling.
+	var card_height = clampf((panel_size.y - 250.0) / 3.0, 90.0, 118.0)
+	var card_desc_height = max(30.0, card_height - 76.0)
 	
-	# Right: actions
-	var right_col = VBoxContainer.new()
-	right_col.add_theme_constant_override("separation", 6)
-	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	columns.add_child(right_col)
+	# Right-side description panel removed by request.
+	# Keep a no-op binder so existing product creation code stays simple.
+	var bind_detail = func(_ctrl: Control, _t: String, _d: String):
+		pass
+
+	var rarity_color = func(rarity: String) -> Color:
+		match rarity:
+			"rare": return Color(1.0, 0.72, 0.28)
+			"uncommon": return Color(0.35, 0.78, 1.0)
+			_:
+				return Color(0.72, 0.72, 0.72)
 	
-	var actions_title = Label.new()
-	actions_title.text = "操作" if Loc.current_lang == "zh" else "Actions"
-	actions_title.add_theme_font_size_override("font_size", 16)
-	actions_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.9))
-	right_col.add_child(actions_title)
+	var rarity_label = func(rarity: String) -> String:
+		if Loc.current_lang == "zh":
+			match rarity:
+				"rare": return "稀有"
+				"uncommon": return "非凡"
+				_:
+					return "普通"
+		match rarity:
+			"rare": return "Rare"
+			"uncommon": return "Uncommon"
+			_:
+				return "Common"
 	
-	var upgrade_btn = Button.new()
-	upgrade_btn.text = ("升级卡牌 (15G)" if Loc.current_lang == "zh" else "Upgrade Card (15G)")
-	upgrade_btn.custom_minimum_size = Vector2(200, 36)
-	upgrade_btn.add_theme_font_size_override("font_size", 14)
-	upgrade_btn.pressed.connect(func():
-		if GameState.player_gold >= 15 and card_slots.size() > 0:
-			GameState.player_gold -= 15
-			var to_upgrade = card_slots[randi() % card_slots.size()]
-			GameState.upgrade_card(to_upgrade)
-			gold_lbl.text = "Gold: %d" % GameState.player_gold
-			upgrade_btn.text += " ✓"
-			SFX.play("upgrade")
-	)
-	bind_shop_tip.call(upgrade_btn, "随机升级你当前装备栏中的一张卡牌，提高强度。" if Loc.current_lang == "zh" else "Randomly upgrades one equipped card to increase its power.")
-	right_col.add_child(upgrade_btn)
+	var rarity_mul = func(rarity: String) -> float:
+		match rarity:
+			"rare": return 1.7
+			"uncommon": return 1.3
+			_:
+				return 1.0
 	
-	var heal_btn = Button.new()
-	heal_btn.text = ("恢复30%生命 (10G)" if Loc.current_lang == "zh" else "Heal 30% HP (10G)")
-	heal_btn.custom_minimum_size = Vector2(200, 36)
-	heal_btn.add_theme_font_size_override("font_size", 14)
-	heal_btn.pressed.connect(func():
-		if GameState.player_gold >= 10:
-			GameState.player_gold -= 10
-			GameState.heal(GameState.player_max_hp * 3 / 10)
-			gold_lbl.text = "Gold: %d" % GameState.player_gold
-	)
-	bind_shop_tip.call(heal_btn, "立即恢复最大生命值的 30%，用于下一波保命。" if Loc.current_lang == "zh" else "Instantly restores 30% of your max HP for safer next waves.")
-	right_col.add_child(heal_btn)
+
+	var offer_buttons: Array = []
+	var offer_cards: Array = []
+	var reroll_cost: int = 10
 	
-	# Attack upgrades section
-	var atk_title = Label.new()
-	atk_title.text = "攻击能力" if Loc.current_lang == "zh" else "Attacks"
-	atk_title.add_theme_font_size_override("font_size", 16)
-	atk_title.add_theme_color_override("font_color", Color(1, 0.6, 0.3))
-	right_col.add_child(atk_title)
+	var refresh_shop_state: Callable
+	refresh_shop_state = func():
+		gold_lbl.text = (("金币: %d" if Loc.current_lang == "zh" else "Gold: %d") % GameState.player_gold)
+		reroll_btn.text = (("刷新商品 (%dG)" if Loc.current_lang == "zh" else "Refresh (%dG)") % reroll_cost)
+		reroll_btn.disabled = GameState.player_gold < reroll_cost
+		for it in offer_buttons:
+			var b = it["btn"] as Button
+			if not is_instance_valid(b) or b.disabled:
+				continue
+			var cost = int(it["cost"])
+			b.modulate = Color(1, 1, 1, 1) if GameState.player_gold >= cost else Color(0.62, 0.56, 0.56, 1)
 	
-	# Offer random attack upgrades: [id, name, cost, description]
-	var all_attacks = [
-		["orbit_blades", "旋转刀刃" if Loc.current_lang == "zh" else "Orbit Blades", 20,
-			"召唤环绕飞刃持续切割附近敌人。" if Loc.current_lang == "zh" else "Summons orbiting blades that repeatedly cut nearby enemies."],
-		["chain_lightning_passive", "连锁闪电" if Loc.current_lang == "zh" else "Chain Lightning", 25,
-			"周期性释放闪电，自动跳跃打击多个目标。" if Loc.current_lang == "zh" else "Periodically casts lightning that chains across multiple enemies."],
-		["flame_tornado", "火焰旋风" if Loc.current_lang == "zh" else "Flame Tornado", 30,
-			"在角色周围生成火焰旋风，持续造成范围伤害。" if Loc.current_lang == "zh" else "Creates a fiery tornado around you for continuous AoE damage."],
-		["ice_nova", "冰霜新星" if Loc.current_lang == "zh" else "Ice Nova", 25,
-			"爆发寒冰冲击，冻结并伤害周围敌人。" if Loc.current_lang == "zh" else "Unleashes an icy nova that damages and freezes nearby foes."],
-		["poison_cloud", "毒雾" if Loc.current_lang == "zh" else "Poison Cloud", 20,
-			"生成持续毒雾，对接近敌人叠加中毒。" if Loc.current_lang == "zh" else "Creates a poison cloud that damages and poisons nearby enemies."],
-		["holy_cross", "圣光十字" if Loc.current_lang == "zh" else "Holy Cross", 25,
-			"向多个方向发射穿透弹幕。" if Loc.current_lang == "zh" else "Fires piercing projectiles in multiple directions."],
-		["meteor_rain", "陨石雨" if Loc.current_lang == "zh" else "Meteor Rain", 35,
-			"召唤多发陨石，对大范围造成高爆发伤害。" if Loc.current_lang == "zh" else "Calls down multiple meteors for high burst AoE damage."],
-		["spirit_sword", "灵魂飞剑" if Loc.current_lang == "zh" else "Spirit Sword", 30,
-			"释放追踪飞剑，自动锁定并穿刺敌人。" if Loc.current_lang == "zh" else "Summons homing spirit swords that seek and strike enemies."],
-		["earthquake", "地震" if Loc.current_lang == "zh" else "Earthquake", 30,
-			"触发地震冲击波，击退并重创近身敌群。" if Loc.current_lang == "zh" else "Triggers a quake shockwave that knocks back and damages crowds."],
-		["vampiric_aura", "吸血光环" if Loc.current_lang == "zh" else "Vampiric Aura", 25,
-			"持续吸取附近敌人生命并为你恢复血量。" if Loc.current_lang == "zh" else "Drains nearby enemies over time and heals you."],
-	]
-	all_attacks.shuffle()
+	var clear_cards = func():
+		for c in offer_cards:
+			if is_instance_valid(c):
+				c.queue_free()
+		offer_cards.clear()
+		offer_buttons.clear()
 	
-	for i in range(min(3, all_attacks.size())):
-		var atk = all_attacks[i]
-		var atk_id: String = atk[0]
-		var atk_name: String = atk[1]
-		var atk_cost: int = atk[2]
-		var atk_desc: String = atk[3]
-		var current_lvl = attack_levels.get(atk_id, 0)
-		var is_new = not unlocked_attacks.has(atk_id)
-		var label_text: String
-		if is_new:
-			label_text = "%s (%dG)" % [atk_name, atk_cost]
-		else:
-			label_text = "%s Lv%d→%d (%dG)" % [atk_name, current_lvl, current_lvl + 1, atk_cost]
+	var make_offer_card: Callable
+	make_offer_card = func(entry: Dictionary):
+		var card = PanelContainer.new()
+		card.custom_minimum_size = Vector2(0, card_height)
 		
-		var atk_btn = Button.new()
-		atk_btn.text = label_text
-		atk_btn.custom_minimum_size = Vector2(200, 36)
-		atk_btn.add_theme_font_size_override("font_size", 13)
-		atk_btn.pressed.connect(func():
-			if GameState.player_gold >= atk_cost:
-				GameState.player_gold -= atk_cost
-				if not unlocked_attacks.has(atk_id):
-					unlocked_attacks.append(atk_id)
-					attack_levels[atk_id] = 1
-				else:
-					attack_levels[atk_id] = attack_levels.get(atk_id, 1) + 1
-				gold_lbl.text = "Gold: %d" % GameState.player_gold
-				atk_btn.disabled = true
-				atk_btn.text += " ✓"
-				SFX.play("powerup")
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = Color(0.12, 0.13, 0.17, 0.96)
+		sb.border_color = rarity_color.call(str(entry.get("rarity", "common")))
+		sb.set_border_width_all(2)
+		sb.corner_radius_top_left = 8
+		sb.corner_radius_top_right = 8
+		sb.corner_radius_bottom_left = 8
+		sb.corner_radius_bottom_right = 8
+		card.add_theme_stylebox_override("panel", sb)
+		
+		var m = MarginContainer.new()
+		m.add_theme_constant_override("margin_left", 8)
+		m.add_theme_constant_override("margin_right", 8)
+		m.add_theme_constant_override("margin_top", 6)
+		m.add_theme_constant_override("margin_bottom", 6)
+		card.add_child(m)
+		
+		var vb = VBoxContainer.new()
+		vb.add_theme_constant_override("separation", 4)
+		m.add_child(vb)
+		
+		var top = HBoxContainer.new()
+		vb.add_child(top)
+		
+		var name_lbl = Label.new()
+		name_lbl.text = str(entry.get("title", "Item"))
+		name_lbl.add_theme_font_size_override("font_size", 14)
+		name_lbl.add_theme_color_override("font_color", Color(0.97, 0.95, 0.9))
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		top.add_child(name_lbl)
+		
+		var rarity_lbl = Label.new()
+		rarity_lbl.text = "[%s]" % rarity_label.call(str(entry.get("rarity", "common")))
+		rarity_lbl.add_theme_font_size_override("font_size", 11)
+		rarity_lbl.add_theme_color_override("font_color", rarity_color.call(str(entry.get("rarity", "common"))))
+		top.add_child(rarity_lbl)
+		
+		var desc_lbl = Label.new()
+		desc_lbl.text = str(entry.get("desc", ""))
+		desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc_lbl.add_theme_font_size_override("font_size", 12)
+		desc_lbl.add_theme_color_override("font_color", Color(0.78, 0.84, 0.94))
+		desc_lbl.custom_minimum_size = Vector2(0, card_desc_height)
+		vb.add_child(desc_lbl)
+		
+		var bottom = HBoxContainer.new()
+		vb.add_child(bottom)
+		
+		var cost: int = int(entry.get("cost", 0))
+		var cost_lbl = Label.new()
+		cost_lbl.text = "%dG" % cost
+		cost_lbl.add_theme_font_size_override("font_size", 13)
+		cost_lbl.add_theme_color_override("font_color", Color(1, 0.84, 0.2))
+		cost_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bottom.add_child(cost_lbl)
+		
+		var buy_btn = Button.new()
+		buy_btn.text = ("购买" if Loc.current_lang == "zh" else "Buy")
+		buy_btn.custom_minimum_size = Vector2(68, 28)
+		buy_btn.add_theme_font_size_override("font_size", 12)
+		bottom.add_child(buy_btn)
+		
+		var kind = str(entry.get("kind", ""))
+		buy_btn.pressed.connect(func():
+			if buy_btn.disabled:
+				return
+			if GameState.player_gold < cost:
+				return
+			
+			if kind == "upgrade" and card_slots.is_empty():
+				add_log("[color=gray]没有可升级卡牌[/color]" if Loc.current_lang == "zh" else "[color=gray]No cards to upgrade[/color]")
+				return
+			
+			GameState.player_gold -= cost
+			match kind:
+				"card":
+					GameState.add_card_to_deck(str(entry.get("id", "")))
+					SFX.play("coin")
+				"attack":
+					var atk_id = str(entry.get("id", ""))
+					if not unlocked_attacks.has(atk_id):
+						unlocked_attacks.append(atk_id)
+						attack_levels[atk_id] = 1
+					else:
+						attack_levels[atk_id] = attack_levels.get(atk_id, 1) + 1
+					SFX.play("powerup")
+				"upgrade":
+					var to_upgrade = card_slots[randi() % card_slots.size()]
+					GameState.upgrade_card(to_upgrade)
+					SFX.play("upgrade")
+				"heal":
+					GameState.heal(GameState.player_max_hp * 3 / 10)
+					if is_instance_valid(player):
+						player.update_hp_bar(GameState.player_hp, GameState.player_max_hp)
+					SFX.play("heal")
+			
+			buy_btn.disabled = true
+			buy_btn.text = ("已购✓" if Loc.current_lang == "zh" else "Bought✓")
+			card.modulate = Color(0.82, 0.82, 0.82, 0.95)
+			refresh_shop_state.call()
 		)
-		bind_shop_tip.call(atk_btn, atk_desc)
-		right_col.add_child(atk_btn)
+		
+		offer_buttons.append({"btn": buy_btn, "cost": cost})
+		bind_detail.call(card, str(entry.get("title", "")), str(entry.get("detail", entry.get("desc", ""))))
+		var col_idx = min(int(offer_cards.size() / 3), shop_columns.size() - 1)
+		var target_col = shop_columns[col_idx] as VBoxContainer
+		if target_col:
+			target_col.add_child(card)
+		else:
+			product_row.add_child(card)
+		offer_cards.append(card)
 	
-	# Shop option description area
-	main_vbox.add_child(tip_label)
+	var attack_pool = [
+		{"id":"orbit_blades", "name_zh":"旋转刀刃", "name_en":"Orbit Blades", "cost":20, "desc_zh":"召唤环绕飞刃持续切割附近敌人。", "desc_en":"Summons orbiting blades that repeatedly cut nearby enemies."},
+		{"id":"chain_lightning_passive", "name_zh":"连锁闪电", "name_en":"Chain Lightning", "cost":25, "desc_zh":"周期性释放闪电，自动跳跃打击多个目标。", "desc_en":"Periodically casts lightning that chains across multiple enemies."},
+		{"id":"flame_tornado", "name_zh":"火焰旋风", "name_en":"Flame Tornado", "cost":30, "desc_zh":"在角色周围生成火焰旋风，持续造成范围伤害。", "desc_en":"Creates a fiery tornado around you for continuous AoE damage."},
+		{"id":"ice_nova", "name_zh":"冰霜新星", "name_en":"Ice Nova", "cost":25, "desc_zh":"爆发寒冰冲击，冻结并伤害周围敌人。", "desc_en":"Unleashes an icy nova that damages and freezes nearby foes."},
+		{"id":"poison_cloud", "name_zh":"毒雾", "name_en":"Poison Cloud", "cost":20, "desc_zh":"生成持续毒雾，对接近敌人叠加中毒。", "desc_en":"Creates a poison cloud that damages and poisons nearby enemies."},
+		{"id":"holy_cross", "name_zh":"圣光十字", "name_en":"Holy Cross", "cost":25, "desc_zh":"向多个方向发射穿透弹幕。", "desc_en":"Fires piercing projectiles in multiple directions."},
+		{"id":"meteor_rain", "name_zh":"陨石雨", "name_en":"Meteor Rain", "cost":35, "desc_zh":"召唤多发陨石，对大范围造成高爆发伤害。", "desc_en":"Calls down multiple meteors for high burst AoE damage."},
+		{"id":"spirit_sword", "name_zh":"灵魂飞剑", "name_en":"Spirit Sword", "cost":30, "desc_zh":"释放追踪飞剑，自动锁定并穿刺敌人。", "desc_en":"Summons homing spirit swords that seek and strike enemies."},
+		{"id":"earthquake", "name_zh":"地震", "name_en":"Earthquake", "cost":30, "desc_zh":"触发地震冲击波，击退并重创近身敌群。", "desc_en":"Triggers a quake shockwave that knocks back and damages crowds."},
+		{"id":"vampiric_aura", "name_zh":"吸血光环", "name_en":"Vampiric Aura", "cost":25, "desc_zh":"持续吸取附近敌人生命并为你恢复血量。", "desc_en":"Drains nearby enemies over time and heals you."},
+	]
 	
-	# Continue button at bottom
-	var spacer = Control.new()
-	spacer.custom_minimum_size = Vector2(0, 10)
-	main_vbox.add_child(spacer)
+	var build_offers: Callable
+	build_offers = func():
+		clear_cards.call()
+		
+		# Keep each column color-consistent: Common / Uncommon / Rare
+		var common_offers: Array = []
+		var uncommon_offers: Array = []
+		var rare_offers: Array = []
+		
+		var push_offer = func(entry: Dictionary):
+			var rar = str(entry.get("rarity", "common"))
+			match rar:
+				"rare":
+					rare_offers.append(entry)
+				"uncommon":
+					uncommon_offers.append(entry)
+				_:
+					common_offers.append(entry)
+		
+		var card_ids: Array = GameData.CARDS.keys()
+		card_ids.shuffle()
+		var card_pick_idx: int = 0
+		var add_card_offer = func(target_rarity: String):
+			if card_ids.is_empty():
+				return
+			if card_pick_idx >= card_ids.size():
+				card_ids.shuffle()
+				card_pick_idx = 0
+			var card_id: String = card_ids[card_pick_idx]
+			card_pick_idx += 1
+			var def = GameData.CARDS.get(card_id)
+			if not def:
+				return
+			var base_cost = 10 + def.energy_cost * 5
+			var final_cost = int(round(base_cost * float(rarity_mul.call(target_rarity))))
+			push_offer.call({
+				"kind": "card",
+				"id": card_id,
+				"title": _card_name(card_id, def),
+				"desc": _card_desc(card_id, def),
+				"detail": (("加入卡组。效果：" if Loc.current_lang == "zh" else "Adds to deck. Effect: ") + _card_desc(card_id, def)),
+				"cost": final_cost,
+				"rarity": target_rarity,
+			})
+		
+		var atk_pool: Array = attack_pool.duplicate()
+		atk_pool.shuffle()
+		var atk_pick_idx: int = 0
+		var add_attack_offer = func(target_rarity: String):
+			if atk_pool.is_empty():
+				return
+			if atk_pick_idx >= atk_pool.size():
+				atk_pool.shuffle()
+				atk_pick_idx = 0
+			var atk = atk_pool[atk_pick_idx]
+			atk_pick_idx += 1
+			var atk_id = str(atk["id"])
+			var base_cost = int(atk["cost"])
+			var final_cost = int(round(base_cost * float(rarity_mul.call(target_rarity))))
+			var lvl = attack_levels.get(atk_id, 0)
+			var is_new = not unlocked_attacks.has(atk_id)
+			var name = str(atk["name_zh"]) if Loc.current_lang == "zh" else str(atk["name_en"])
+			if not is_new:
+				name = "%s Lv%d→%d" % [name, lvl, lvl + 1]
+			push_offer.call({
+				"kind": "attack",
+				"id": atk_id,
+				"title": name,
+				"desc": str(atk["desc_zh"]) if Loc.current_lang == "zh" else str(atk["desc_en"]),
+				"detail": str(atk["desc_zh"]) if Loc.current_lang == "zh" else str(atk["desc_en"]),
+				"cost": final_cost,
+				"rarity": target_rarity,
+			})
+		
+		# Fixed utility cards by rarity
+		push_offer.call({
+			"kind": "heal",
+			"title": ("恢复30%生命" if Loc.current_lang == "zh" else "Heal 30% HP"),
+			"desc": ("立即恢复最大生命值的 30%。" if Loc.current_lang == "zh" else "Instantly restore 30% max HP."),
+			"detail": ("立即恢复最大生命值的 30%，适合为下一波保命。" if Loc.current_lang == "zh" else "Instantly restores 30% max HP to survive upcoming waves."),
+			"cost": 10,
+			"rarity": "common",
+		})
+		push_offer.call({
+			"kind": "upgrade",
+			"title": ("升级卡牌" if Loc.current_lang == "zh" else "Upgrade Card"),
+			"desc": ("随机升级一张装备栏卡牌。" if Loc.current_lang == "zh" else "Randomly upgrades one equipped card."),
+			"detail": ("随机升级你当前装备栏中的一张卡牌，提升其强度。" if Loc.current_lang == "zh" else "Randomly upgrades one equipped card and improves its effectiveness."),
+			"cost": 15,
+			"rarity": "uncommon",
+		})
+		
+		# Build offers so each rarity column has exactly 3 cards
+		add_card_offer.call("common")
+		add_attack_offer.call("common")
+		add_card_offer.call("uncommon")
+		add_attack_offer.call("uncommon")
+		add_card_offer.call("rare")
+		add_attack_offer.call("rare")
+		
+		while common_offers.size() < 3:
+			add_card_offer.call("common")
+		while uncommon_offers.size() < 3:
+			add_card_offer.call("uncommon")
+		while rare_offers.size() < 3:
+			add_card_offer.call("rare")
+		
+		for i in range(min(3, common_offers.size())):
+			make_offer_card.call(common_offers[i])
+		for i in range(min(3, uncommon_offers.size())):
+			make_offer_card.call(uncommon_offers[i])
+		for i in range(min(3, rare_offers.size())):
+			make_offer_card.call(rare_offers[i])
+		
+		refresh_shop_state.call()
+	
+	reroll_btn.pressed.connect(func():
+		if GameState.player_gold < reroll_cost:
+			return
+		GameState.player_gold -= reroll_cost
+		SFX.play("dice_roll")
+		build_offers.call()
+	)
+	
+	# Footer
+	var footer = HBoxContainer.new()
+	footer.alignment = BoxContainer.ALIGNMENT_END
+	footer.add_theme_constant_override("separation", 8)
+	root.add_child(footer)
+	
+	var leave_btn = Button.new()
+	leave_btn.text = ("跳过购物" if Loc.current_lang == "zh" else "Skip Shop")
+	leave_btn.custom_minimum_size = Vector2(120, 40)
+	leave_btn.pressed.connect(func():
+		overlay.queue_free()
+		GameState.combo_count = 0
+		GameState.player_energy = GameState.player_max_energy
+		_start_wave(current_wave + 1)
+	)
+	bind_detail.call(leave_btn,
+		"跳过购物" if Loc.current_lang == "zh" else "Skip Shop",
+		"不花钱，立即进入下一波。" if Loc.current_lang == "zh" else "Enter the next wave immediately without buying anything.")
+	footer.add_child(leave_btn)
 	
 	var continue_btn = Button.new()
-	continue_btn.text = (">> 下一波 >>" if Loc.current_lang == "zh" else ">> Next Wave >>")
-	continue_btn.custom_minimum_size = Vector2(200, 44)
-	continue_btn.add_theme_font_size_override("font_size", 18)
-	continue_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	continue_btn.text = ("完成购买，进入下一波" if Loc.current_lang == "zh" else "Start Next Wave")
+	continue_btn.custom_minimum_size = Vector2(210, 44)
+	continue_btn.add_theme_font_size_override("font_size", 16)
 	continue_btn.pressed.connect(func():
 		overlay.queue_free()
 		GameState.combo_count = 0
 		GameState.player_energy = GameState.player_max_energy
 		_start_wave(current_wave + 1)
 	)
-	bind_shop_tip.call(continue_btn, "结束购物并进入下一波战斗。" if Loc.current_lang == "zh" else "Finish shopping and start the next wave.")
-	main_vbox.add_child(continue_btn)
+	bind_detail.call(continue_btn,
+		"开始下一波" if Loc.current_lang == "zh" else "Start Next Wave",
+		"结束当前商店阶段并进入战斗。" if Loc.current_lang == "zh" else "Finish shopping and return to combat.")
+	footer.add_child(continue_btn)
+	
+	build_offers.call()
 
 # === PAUSE MENU ===
 
