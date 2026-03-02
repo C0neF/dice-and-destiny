@@ -14,12 +14,64 @@ var sprite: AnimatedSprite2D
 var hp_bar_bg: ColorRect
 var hp_bar_fill: ColorRect
 
+const PLAYER_VISUAL_SCALE := Vector2(1.35, 1.35)
+const DUELYST_PLAYER_SCALE := Vector2(0.72, 0.72)
+const DUELYST_PLAYER_FRAMES_PATH := "res://addons/duelyst_animated_sprites/assets/spriteframes/units/neutral_moonlitsorcerer.tres"
+const HP_BAR_WIDTH = 28.0
+
 # Animation frames
 var anim_frames: SpriteFrames
+var using_duelyst_player: bool = false
+var _last_hp: int = -1
 
 func _ready():
-	# Build animated sprite from survivor spritesheet frames
-	anim_frames = SpriteFrames.new()
+	anim_frames = _build_player_spriteframes()
+	
+	sprite = AnimatedSprite2D.new()
+	sprite.name = "Sprite"
+	sprite.sprite_frames = anim_frames
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	sprite.scale = DUELYST_PLAYER_SCALE if using_duelyst_player else PLAYER_VISUAL_SCALE
+	sprite.play(_pick_anim(["idle", "run", "walk_down", "walk_side", "walk_up"]))
+	sprite.animation_finished.connect(_on_animation_finished)
+	add_child(sprite)
+	
+	# HP bar above player
+	hp_bar_bg = ColorRect.new()
+	hp_bar_bg.size = Vector2(HP_BAR_WIDTH, 3)
+	hp_bar_bg.position = Vector2(-HP_BAR_WIDTH * 0.5, -24)
+	hp_bar_bg.color = Color(0.2, 0.1, 0.1)
+	add_child(hp_bar_bg)
+	
+	hp_bar_fill = ColorRect.new()
+	hp_bar_fill.size = Vector2(HP_BAR_WIDTH, 3)
+	hp_bar_fill.position = Vector2(-HP_BAR_WIDTH * 0.5, -24)
+	hp_bar_fill.color = Color(0.1, 0.8, 0.2)
+	add_child(hp_bar_fill)
+	
+	# Collision shape
+	var col = CollisionShape2D.new()
+	var shape = CircleShape2D.new()
+	shape.radius = 7.5 if using_duelyst_player else 6.0
+	col.shape = shape
+	add_child(col)
+	
+	# Player on layer 1
+	collision_layer = 1
+	collision_mask = 2 | 4  # Detect enemies (2) + obstacles (4)
+
+func _build_player_spriteframes() -> SpriteFrames:
+	if ResourceLoader.exists(DUELYST_PLAYER_FRAMES_PATH):
+		var duelyst_frames = load(DUELYST_PLAYER_FRAMES_PATH)
+		if duelyst_frames is SpriteFrames:
+			using_duelyst_player = true
+			return duelyst_frames
+	
+	using_duelyst_player = false
+	return _build_survivor_spriteframes()
+
+func _build_survivor_spriteframes() -> SpriteFrames:
+	var frames = SpriteFrames.new()
 	
 	# Define animations: idle, walk_down, walk_side, walk_up
 	var anims = {
@@ -30,47 +82,30 @@ func _ready():
 	}
 	
 	for anim_name in anims:
-		if anim_name != "idle":  # "default" already exists, we'll rename
-			anim_frames.add_animation(anim_name)
+		if anim_name != "idle":
+			frames.add_animation(anim_name)
 		else:
-			anim_frames.rename_animation("default", "idle")
-		anim_frames.set_animation_speed(anim_name, 6)
-		anim_frames.set_animation_loop(anim_name, true)
+			frames.rename_animation("default", "idle")
+		frames.set_animation_speed(anim_name, 6)
+		frames.set_animation_loop(anim_name, true)
 		for i in range(1, 5):
 			var tex = load(anims[anim_name] % i)
 			if tex:
-				anim_frames.add_frame(anim_name, tex)
+				frames.add_frame(anim_name, tex)
 	
-	sprite = AnimatedSprite2D.new()
-	sprite.name = "Sprite"
-	sprite.sprite_frames = anim_frames
-	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	sprite.play("idle")
-	add_child(sprite)
-	
-	# HP bar above player
-	hp_bar_bg = ColorRect.new()
-	hp_bar_bg.size = Vector2(24, 3)
-	hp_bar_bg.position = Vector2(-12, -20)
-	hp_bar_bg.color = Color(0.2, 0.1, 0.1)
-	add_child(hp_bar_bg)
-	
-	hp_bar_fill = ColorRect.new()
-	hp_bar_fill.size = Vector2(24, 3)
-	hp_bar_fill.position = Vector2(-12, -20)
-	hp_bar_fill.color = Color(0.1, 0.8, 0.2)
-	add_child(hp_bar_fill)
-	
-	# Collision shape
-	var col = CollisionShape2D.new()
-	var shape = CircleShape2D.new()
-	shape.radius = 6.0
-	col.shape = shape
-	add_child(col)
-	
-	# Player on layer 1
-	collision_layer = 1
-	collision_mask = 2 | 4  # Detect enemies (2) + obstacles (4)
+	return frames
+
+func _has_anim(name: String) -> bool:
+	return sprite and sprite.sprite_frames and sprite.sprite_frames.has_animation(name)
+
+func _pick_anim(preferred: Array[String]) -> String:
+	if not anim_frames:
+		return "idle"
+	for anim_name in preferred:
+		if anim_frames.has_animation(anim_name):
+			return anim_name
+	var names = anim_frames.get_animation_names()
+	return names[0] if names.size() > 0 else "idle"
 
 func _physics_process(_delta):
 	var input = Vector2.ZERO
@@ -85,18 +120,22 @@ func _physics_process(_delta):
 	
 	if input.length() > 0:
 		input = input.normalized()
-		# Choose animation based on dominant direction
-		if abs(input.x) > abs(input.y):
-			sprite.play("walk_side")
-			sprite.flip_h = input.x < 0
-		elif input.y > 0:
-			sprite.play("walk_down")
-			sprite.flip_h = false
+		if using_duelyst_player:
+			sprite.play(_pick_anim(["run", "walk", "move", "walk_side", "walk_down", "walk_up", "idle"]))
+			sprite.flip_h = input.x < -0.05
 		else:
-			sprite.play("walk_up")
-			sprite.flip_h = false
+			# Choose animation based on dominant direction
+			if abs(input.x) > abs(input.y):
+				sprite.play("walk_side")
+				sprite.flip_h = input.x < 0
+			elif input.y > 0:
+				sprite.play("walk_down")
+				sprite.flip_h = false
+			else:
+				sprite.play("walk_up")
+				sprite.flip_h = false
 	else:
-		sprite.play("idle")
+		sprite.play(_pick_anim(["idle", "run", "walk_down", "walk_side", "walk_up"]))
 	
 	velocity = input * move_speed
 	move_and_slide()
@@ -106,7 +145,11 @@ func _physics_process(_delta):
 	position.x = clampf(position.x, arena_min.x, arena_max.x)
 	position.y = clampf(position.y, arena_min.y, arena_max.y)
 
-const HP_BAR_WIDTH = 24.0
+func _on_animation_finished() -> void:
+	if not sprite:
+		return
+	if sprite.animation in ["hit", "hurt", "attack", "action"]:
+		sprite.play(_pick_anim(["idle", "run", "walk_down", "walk_side", "walk_up"]))
 
 func update_hp_bar(current: int, maximum: int):
 	if hp_bar_fill:
@@ -119,3 +162,7 @@ func update_hp_bar(current: int, maximum: int):
 			hp_bar_fill.color = Color(0.9, 0.75, 0.1)
 		else:
 			hp_bar_fill.color = Color(0.9, 0.15, 0.1)
+		
+	if _last_hp >= 0 and current < _last_hp and _has_anim("hit"):
+		sprite.play("hit")
+	_last_hp = current

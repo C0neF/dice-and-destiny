@@ -23,6 +23,8 @@ VFX="*res://scripts/core/vfx_manager.gd"
 Loc="*res://scripts/core/loc.gd"
 SaveManager="*res://scripts/core/save_manager.gd"
 SFX="*res://scripts/core/audio_manager.gd"
+AchievementManager="*res://addons/milestone/autoload/achievement_manager.gd"
+AchievementBridge="*res://scripts/core/achievement_bridge.gd"
 
 [display]
 
@@ -31,6 +33,10 @@ window/size/viewport_height=540
 window/size/window_width_override=1920
 window/size/window_height_override=1080
 window/stretch/mode="viewport"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/milestone/plugin.cfg", "res://addons/uiJuicer/plugin.cfg")
 
 [input]
 
@@ -68,6 +74,13 @@ end_turn={
 "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":69,"physical_keycode":0,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
 ]
 }
+
+[milestone]
+
+general/achievements_path="res://assets/achievements"
+general/save_as_json=true
+debug/print_errors=true
+debug/print_output=true
 
 [rendering]
 

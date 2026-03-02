@@ -27,6 +27,7 @@ extends Control
 
 var title_time: float = 0.0
 var continue_btn: Button = null
+var _settings_fader: Node = null
 
 func _ready():
 	theme = ThemeGen.create_game_theme()
@@ -63,6 +64,7 @@ func _ready():
 	)
 	
 	settings_panel.visible = false
+	_settings_fader = _setup_panel_fader(settings_panel)
 	
 	# Add Continue button if a run save exists
 	if SaveManager.has_run_save():
@@ -99,6 +101,24 @@ func _process(delta):
 	if subtitle_label:
 		var pulse = 0.7 + 0.3 * sin(title_time * 2.0)
 		subtitle_label.modulate = Color(pulse, pulse * 0.9, pulse * 0.7)
+
+func _setup_panel_fader(panel: Control) -> Node:
+	if not panel:
+		return null
+	var fader_script = load("res://addons/uiJuicer/Fader.gd")
+	if not fader_script:
+		return null
+	for child in panel.get_children():
+		if child.get_script() == fader_script:
+			return child
+	var fader = fader_script.new()
+	fader.AutoFadeIn = false
+	fader.StartVisible = false
+	fader.FadeInTime = 0.2
+	fader.FadeOutTime = 0.15
+	fader.ChangeVisibility = false
+	panel.add_child(fader)
+	return fader
 
 func _update_texts():
 	title_label.text = Loc.t("title")
@@ -159,8 +179,12 @@ func _on_continue():
 func _on_settings():
 	settings_panel.visible = true
 	$VBox.visible = false
+	if _settings_fader and _settings_fader.has_method("FadeIn"):
+		_settings_fader.FadeIn(0.2)
 
 func _on_back():
+	if _settings_fader and _settings_fader.has_method("FadeOut"):
+		await _settings_fader.FadeOut(0.15)
 	settings_panel.visible = false
 	$VBox.visible = true
 	SaveManager.save_meta()  # Persist volume + language

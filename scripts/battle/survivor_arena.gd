@@ -5,12 +5,14 @@ signal wave_complete(wave_num: int)
 signal run_over(victory: bool)
 
 const ARENA_SIZE = Vector2(640, 360)
-# Wall-interior bounds (matching survivor_arena_bg wall inner edges)
-# Top is already aligned; expand left/right/bottom outward to match the painted walls.
-const ARENA_MIN = Vector2(-10, 22)
-const ARENA_MAX = Vector2(650, 358)
+# Wall-interior bounds (matching the current survivor_arena_bg wall inner edges)
+# Tuned for the 1376x768 replacement map scaled to 720x440 at (-40, -40).
+const ARENA_MIN = Vector2(-5, 40)
+const ARENA_MAX = Vector2(645, 360)
 const SPAWN_MARGIN = 40.0
 const WALL_THICKNESS = 40.0  # Collision wall thickness (placed outside playable area)
+const MAGE_COLOR_PRIMARY := Color(0.74, 0.44, 1.0, 0.95)
+const MAGE_COLOR_SECONDARY := Color(1.0, 0.58, 0.92, 0.92)
 
 # Drop item script
 const DropItemScript = preload("res://scripts/battle/drop_item.gd")
@@ -118,31 +120,7 @@ func _setup_arena():
 	# === Physical wall colliders ===
 	_create_wall_colliders()
 	
-	# Place collision obstacles - corner crystals (inset from new arena bounds)
-	var obstacles = [
-		[10, 42, 16],     # Top-left crystal
-		[630, 42, 16],    # Top-right crystal
-		[10, 338, 16],    # Bottom-left crystal
-		[630, 338, 16],   # Bottom-right crystal
-	]
-	
-	var obstacle_container = Node2D.new()
-	obstacle_container.name = "Obstacles"
-	add_child(obstacle_container)
-	
-	for obs in obstacles:
-		var body = StaticBody2D.new()
-		body.position = Vector2(obs[0], obs[1])
-		body.collision_layer = 4  # Obstacle layer
-		body.collision_mask = 0
-		
-		var col = CollisionShape2D.new()
-		var shape = CircleShape2D.new()
-		shape.radius = obs[2]
-		col.shape = shape
-		body.add_child(col)
-		
-		obstacle_container.add_child(body)
+	# No extra static crystal obstacles on the map; keep only arena wall colliders.
 	
 	enemy_container = Node2D.new()
 	enemy_container.name = "Enemies"
@@ -327,6 +305,44 @@ func _card_name(card_id: String, card_def = null) -> String:
 	if card_def and card_def.name != "":
 		return card_def.name
 	return card_id
+
+func _card_desc(card_id: String, card_def = null) -> String:
+	if card_def == null:
+		card_def = GameData.CARDS.get(card_id)
+	if not card_def:
+		return card_id
+	
+	var base_desc = str(card_def.description).replace("{value}", str(card_def.base_value))
+	if Loc.current_lang != "zh":
+		return base_desc
+	
+	var zh_desc_map = {
+		"strike": "造成 {value} 点伤害",
+		"heavy_strike": "造成 {value} 点伤害",
+		"block": "获得 {value} 点护甲",
+		"fortress": "获得 {value} 点护甲",
+		"fireball": "对全体造成 {value} 点魔法伤害",
+		"ice_shard": "造成 {value} 点伤害并冻结 1 回合",
+		"heal": "恢复 {value} 点生命",
+		"regenerate": "3 回合内每回合恢复 {value} 点生命",
+		"lucky_roll": "重掷所有骰子并使每颗 +{value}",
+		"loaded_dice": "将一颗骰子固定为 6",
+		"poison_strike": "造成 {value} 点伤害并附加 2 层中毒",
+		"mirror_shield": "获得 {value} 点护甲并反弹 50% 下次伤害",
+		"flurry": "造成 3 次 {value} 点伤害",
+		"chain_lightning": "对全体造成 {value} 点伤害，每层连击额外 +3",
+		"battle_cry": "本场战斗获得 {value} 点力量",
+		"vampiric_strike": "造成 {value} 点伤害并回复一半",
+		"weaken": "施加 {value} 层虚弱与易伤",
+		"dodge_roll": "获得闪避并抽 1 张牌",
+		"inferno": "对全体施加 {value} 层灼烧",
+		"summon_familiar": "召唤使魔，每回合造成 {value} 点伤害",
+		"double_or_nothing": "若骰子≥4，效果翻倍；否则无效果",
+		"curse_of_pain": "造成 {value} 点伤害并施加 2 回合易伤",
+	}
+	
+	var zh_desc = str(zh_desc_map.get(card_id, base_desc))
+	return zh_desc.replace("{value}", str(card_def.base_value))
 
 func _process(delta):
 	if is_paused or is_shopping:
@@ -587,18 +603,27 @@ func _force_collect_all_drops():
 	for drop in drops:
 		if not is_instance_valid(drop):
 			continue
-		# Emit the collected signal so gold/items are credited
-		if drop.has_signal("collected"):
-			drop.collected.emit(drop.drop_type, drop.value)
-		# Spawn a quick fly-to-player visual
+		
+		var drop_type = drop.get("drop_type")
+		var drop_value = drop.get("value")
+		
+		# Emit only for actual drop items
+		if drop.has_signal("collected") and drop_type != null and drop_value != null:
+			drop.collected.emit(int(drop_type), int(drop_value))
+		
+		# Spawn a quick fly-to-player visual (safe for non-drop nodes too)
 		if is_instance_valid(player):
-			_spawn_collect_fly(drop.global_position, player.global_position, drop)
+			_spawn_collect_fly(drop.global_position, player.global_position, int(drop_type) if drop_type != null else -1)
 		drop.queue_free()
 
 ## Small particle that flies from drop position to player (cosmetic only)
-func _spawn_collect_fly(from: Vector2, to: Vector2, drop):
-	var config = drop.DROP_CONFIG.get(drop.drop_type, [Color(1, 0.85, 0.1), 4.0, "?"])
-	var color: Color = config[0]
+func _spawn_collect_fly(from: Vector2, to: Vector2, drop_type: int = -1):
+	var color: Color = Color(1, 0.85, 0.1)
+	if drop_type >= 0 and DropItemScript:
+		var config = DropItemScript.DROP_CONFIG.get(drop_type)
+		if config != null and config.size() > 0:
+			color = config[0]
+	
 	var p = ColorRect.new()
 	p.size = Vector2(3, 3)
 	p.position = from - Vector2(1.5, 1.5)
@@ -647,7 +672,7 @@ func _update_auto_attack(delta):
 	var dir = (nearest.global_position - player.global_position).normalized()
 	var base_dmg = 3 + current_dice_bonus / 4
 	var proj = _create_projectile(player.global_position, dir, int(base_dmg * _get_damage_multiplier()), 180.0)
-	proj.setup_visual(Color(1, 0.9, 0.4), 3)
+	proj.setup_visual(MAGE_COLOR_SECONDARY, 3.2)
 
 func _find_nearest_enemy() -> Node2D:
 	var best: Node2D = null
@@ -982,9 +1007,9 @@ func _fire_holy_cross(lvl: int):
 	for dir in directions:
 		var p = _create_projectile(player.global_position, dir, dmg, speed)
 		p.pierce = pierce_count
-		p.setup_visual(Color(1, 0.95, 0.6), 5)
+		p.setup_visual(MAGE_COLOR_PRIMARY, 5)
 	# Visual flash
-	VFX.flash_screen(Color(1, 1, 0.8, 0.1), 0.06)
+	VFX.flash_screen(Color(0.62, 0.48, 1.0, 0.14), 0.06)
 
 ## Meteor rain - drops AoE meteors on random enemy positions
 func _drop_meteors(lvl: int):
@@ -1223,7 +1248,23 @@ func _spawn_drain_line(from: Vector2, to: Vector2):
 	tw.tween_property(line, "modulate:a", 0.0, 0.3)
 	tw.tween_callback(line.queue_free)
 
+func _spawn_mage_cast_fx(pos: Vector2, color: Color = MAGE_COLOR_PRIMARY):
+	# Removed the circular cast ring; keep only subtle spark rays.
+	for i in range(5):
+		var ray = Line2D.new()
+		ray.width = 1.4
+		ray.default_color = Color(color.lightened(0.18).r, color.lightened(0.18).g, color.lightened(0.18).b, 0.9)
+		ray.z_index = 19
+		var dir = Vector2.RIGHT.rotated(randf() * TAU)
+		ray.add_point(pos)
+		ray.add_point(pos + dir * randf_range(6.0, 12.0))
+		add_child(ray)
+		var ray_tw = ray.create_tween()
+		ray_tw.tween_property(ray, "modulate:a", 0.0, 0.12)
+		ray_tw.tween_callback(ray.queue_free)
+
 func _create_projectile(from: Vector2, dir: Vector2, dmg: int, spd: float = 200.0) -> Node2D:
+	_spawn_mage_cast_fx(from + dir * 8.0, MAGE_COLOR_PRIMARY)
 	var proj = Area2D.new()
 	var script = load("res://scripts/battle/projectile.gd")
 	proj.set_script(script)
@@ -1305,23 +1346,23 @@ func _execute_card(card_id: String, card_def, value: int):
 						for i in range(3):
 							var spread = dir.rotated(deg_to_rad(-10 + i * 10))
 							var p = _create_projectile(player.global_position, spread, attack_value / 3, 220)
-							p.setup_visual(Color(1, 0.7, 0.3), 3)
+							p.setup_visual(MAGE_COLOR_SECONDARY, 3)
 					"vampiric_strike":
 						var p = _create_projectile(player.global_position, dir, attack_value, 200)
-						p.setup_visual(Color(0.8, 0.1, 0.2), 5)
+						p.setup_visual(Color(0.86, 0.28, 0.78), 5)
 						GameState.heal(attack_value / 3)
 					"poison_strike":
 						var p = _create_projectile(player.global_position, dir, attack_value, 180)
 						p.status_effect = "poison"
 						p.status_stacks = 3
-						p.setup_visual(Color(0.3, 0.9, 0.3), 4)
+						p.setup_visual(Color(0.45, 1.0, 0.65), 4)
 					_:
 						var p = _create_projectile(player.global_position, dir, attack_value, 200)
-						p.setup_visual(Color(1, 1, 0.5), 4)
+						p.setup_visual(MAGE_COLOR_PRIMARY, 4)
 		
 		GameData.CardType.DEFEND:
 			GameState.add_armor(value)
-			VFX.flash_screen(Color(0.3, 0.5, 1, 0.15), 0.1)
+			VFX.flash_screen(Color(0.45, 0.55, 1.0, 0.16), 0.1)
 		
 		GameData.CardType.MAGIC:
 			match card_id:
@@ -1336,7 +1377,7 @@ func _execute_card(card_id: String, card_def, value: int):
 								e.take_damage(aoe_damage, kb)
 								if card_id == "inferno":
 									e.burn_stacks += 3
-					VFX.flash_screen(Color(1, 0.3, 0.1, 0.2), 0.15)
+					VFX.flash_screen(Color(0.9, 0.35, 0.95, 0.22), 0.15)
 				"ice_shard":
 					if nearest:
 						var ice_damage = GameState.apply_damage_with_relics(value)
@@ -1344,7 +1385,7 @@ func _execute_card(card_id: String, card_def, value: int):
 						var p = _create_projectile(player.global_position, dir, ice_damage, 160)
 						p.status_effect = "freeze"
 						p.status_stacks = 2
-						p.setup_visual(Color(0.4, 0.7, 1.0), 5)
+						p.setup_visual(MAGE_COLOR_SECONDARY, 5)
 				"chain_lightning":
 					var bonus = GameState.combo_count * 3
 					var chain_damage = GameState.apply_damage_with_relics(value + bonus)
@@ -1355,7 +1396,7 @@ func _execute_card(card_id: String, card_def, value: int):
 							if dist < 150:
 								e.take_damage(chain_damage, Vector2.ZERO)
 								hit_count += 1
-					VFX.flash_screen(Color(0.5, 0.7, 1, 0.2), 0.1)
+					VFX.flash_screen(Color(0.62, 0.5, 1.0, 0.22), 0.1)
 				"weaken":
 					for e in enemy_container.get_children():
 						if e.has_method("take_damage"):
@@ -1366,7 +1407,8 @@ func _execute_card(card_id: String, card_def, value: int):
 					if nearest:
 						var magic_damage = GameState.apply_damage_with_relics(value)
 						var dir = (nearest.global_position - player.global_position).normalized()
-						_create_projectile(player.global_position, dir, magic_damage, 180)
+						var p = _create_projectile(player.global_position, dir, magic_damage, 180)
+						p.setup_visual(MAGE_COLOR_SECONDARY, 4.5)
 		
 		GameData.CardType.HEAL:
 			GameState.heal(value)
@@ -1468,6 +1510,23 @@ func _open_shop():
 	columns.add_theme_constant_override("separation", 20)
 	main_vbox.add_child(columns)
 	
+	# Hover description (shop tips)
+	var default_tip = "将鼠标移到选项上查看作用说明。" if Loc.current_lang == "zh" else "Hover over an option to see what it does."
+	var tip_label = Label.new()
+	tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip_label.custom_minimum_size = Vector2(0, 46)
+	tip_label.text = default_tip
+	tip_label.add_theme_font_size_override("font_size", 13)
+	tip_label.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95))
+	
+	var bind_shop_tip = func(ctrl: Control, tip_text: String):
+		ctrl.mouse_entered.connect(func():
+			tip_label.text = tip_text
+		)
+		ctrl.mouse_exited.connect(func():
+			tip_label.text = default_tip
+		)
+	
 	# Left: card offers
 	var left_col = VBoxContainer.new()
 	left_col.add_theme_constant_override("separation", 6)
@@ -1503,6 +1562,8 @@ func _open_shop():
 				btn.disabled = true
 				btn.text += " ✓"
 				SFX.play("coin")		)
+		var card_tip = (("加入卡组。效果：" if Loc.current_lang == "zh" else "Adds to your deck. Effect: ") + _card_desc(card_id, card_def))
+		bind_shop_tip.call(btn, card_tip)
 		left_col.add_child(btn)
 	
 	# Right: actions
@@ -1530,6 +1591,7 @@ func _open_shop():
 			upgrade_btn.text += " ✓"
 			SFX.play("upgrade")
 	)
+	bind_shop_tip.call(upgrade_btn, "随机升级你当前装备栏中的一张卡牌，提高强度。" if Loc.current_lang == "zh" else "Randomly upgrades one equipped card to increase its power.")
 	right_col.add_child(upgrade_btn)
 	
 	var heal_btn = Button.new()
@@ -1542,6 +1604,7 @@ func _open_shop():
 			GameState.heal(GameState.player_max_hp * 3 / 10)
 			gold_lbl.text = "Gold: %d" % GameState.player_gold
 	)
+	bind_shop_tip.call(heal_btn, "立即恢复最大生命值的 30%，用于下一波保命。" if Loc.current_lang == "zh" else "Instantly restores 30% of your max HP for safer next waves.")
 	right_col.add_child(heal_btn)
 	
 	# Attack upgrades section
@@ -1551,18 +1614,28 @@ func _open_shop():
 	atk_title.add_theme_color_override("font_color", Color(1, 0.6, 0.3))
 	right_col.add_child(atk_title)
 	
-	# Offer 2 random attack upgrades
+	# Offer random attack upgrades: [id, name, cost, description]
 	var all_attacks = [
-		["orbit_blades", "旋转刀刃" if Loc.current_lang == "zh" else "Orbit Blades", 20],
-		["chain_lightning_passive", "连锁闪电" if Loc.current_lang == "zh" else "Chain Lightning", 25],
-		["flame_tornado", "火焰旋风" if Loc.current_lang == "zh" else "Flame Tornado", 30],
-		["ice_nova", "冰霜新星" if Loc.current_lang == "zh" else "Ice Nova", 25],
-		["poison_cloud", "毒雾" if Loc.current_lang == "zh" else "Poison Cloud", 20],
-		["holy_cross", "圣光十字" if Loc.current_lang == "zh" else "Holy Cross", 25],
-		["meteor_rain", "陨石雨" if Loc.current_lang == "zh" else "Meteor Rain", 35],
-		["spirit_sword", "灵魂飞剑" if Loc.current_lang == "zh" else "Spirit Sword", 30],
-		["earthquake", "地震" if Loc.current_lang == "zh" else "Earthquake", 30],
-		["vampiric_aura", "吸血光环" if Loc.current_lang == "zh" else "Vampiric Aura", 25],
+		["orbit_blades", "旋转刀刃" if Loc.current_lang == "zh" else "Orbit Blades", 20,
+			"召唤环绕飞刃持续切割附近敌人。" if Loc.current_lang == "zh" else "Summons orbiting blades that repeatedly cut nearby enemies."],
+		["chain_lightning_passive", "连锁闪电" if Loc.current_lang == "zh" else "Chain Lightning", 25,
+			"周期性释放闪电，自动跳跃打击多个目标。" if Loc.current_lang == "zh" else "Periodically casts lightning that chains across multiple enemies."],
+		["flame_tornado", "火焰旋风" if Loc.current_lang == "zh" else "Flame Tornado", 30,
+			"在角色周围生成火焰旋风，持续造成范围伤害。" if Loc.current_lang == "zh" else "Creates a fiery tornado around you for continuous AoE damage."],
+		["ice_nova", "冰霜新星" if Loc.current_lang == "zh" else "Ice Nova", 25,
+			"爆发寒冰冲击，冻结并伤害周围敌人。" if Loc.current_lang == "zh" else "Unleashes an icy nova that damages and freezes nearby foes."],
+		["poison_cloud", "毒雾" if Loc.current_lang == "zh" else "Poison Cloud", 20,
+			"生成持续毒雾，对接近敌人叠加中毒。" if Loc.current_lang == "zh" else "Creates a poison cloud that damages and poisons nearby enemies."],
+		["holy_cross", "圣光十字" if Loc.current_lang == "zh" else "Holy Cross", 25,
+			"向多个方向发射穿透弹幕。" if Loc.current_lang == "zh" else "Fires piercing projectiles in multiple directions."],
+		["meteor_rain", "陨石雨" if Loc.current_lang == "zh" else "Meteor Rain", 35,
+			"召唤多发陨石，对大范围造成高爆发伤害。" if Loc.current_lang == "zh" else "Calls down multiple meteors for high burst AoE damage."],
+		["spirit_sword", "灵魂飞剑" if Loc.current_lang == "zh" else "Spirit Sword", 30,
+			"释放追踪飞剑，自动锁定并穿刺敌人。" if Loc.current_lang == "zh" else "Summons homing spirit swords that seek and strike enemies."],
+		["earthquake", "地震" if Loc.current_lang == "zh" else "Earthquake", 30,
+			"触发地震冲击波，击退并重创近身敌群。" if Loc.current_lang == "zh" else "Triggers a quake shockwave that knocks back and damages crowds."],
+		["vampiric_aura", "吸血光环" if Loc.current_lang == "zh" else "Vampiric Aura", 25,
+			"持续吸取附近敌人生命并为你恢复血量。" if Loc.current_lang == "zh" else "Drains nearby enemies over time and heals you."],
 	]
 	all_attacks.shuffle()
 	
@@ -1571,6 +1644,7 @@ func _open_shop():
 		var atk_id: String = atk[0]
 		var atk_name: String = atk[1]
 		var atk_cost: int = atk[2]
+		var atk_desc: String = atk[3]
 		var current_lvl = attack_levels.get(atk_id, 0)
 		var is_new = not unlocked_attacks.has(atk_id)
 		var label_text: String
@@ -1596,7 +1670,11 @@ func _open_shop():
 				atk_btn.text += " ✓"
 				SFX.play("powerup")
 		)
+		bind_shop_tip.call(atk_btn, atk_desc)
 		right_col.add_child(atk_btn)
+	
+	# Shop option description area
+	main_vbox.add_child(tip_label)
 	
 	# Continue button at bottom
 	var spacer = Control.new()
@@ -1614,6 +1692,7 @@ func _open_shop():
 		GameState.player_energy = GameState.player_max_energy
 		_start_wave(current_wave + 1)
 	)
+	bind_shop_tip.call(continue_btn, "结束购物并进入下一波战斗。" if Loc.current_lang == "zh" else "Finish shopping and start the next wave.")
 	main_vbox.add_child(continue_btn)
 
 # === PAUSE MENU ===
@@ -1870,6 +1949,10 @@ func _update_hud():
 		var armor_text = ("护甲" if Loc.current_lang == "zh" else "Armor") + ": %d" % GameState.player_armor
 		var gold_text = ("金币" if Loc.current_lang == "zh" else "Gold") + ": %d" % GameState.player_gold
 		hp_label.text = "%s  %s  %s" % [hp_text, armor_text, gold_text]
+	
+	# Keep player HP bar always synchronized with top-left HUD values.
+	if is_instance_valid(player) and player.has_method("update_hp_bar"):
+		player.update_hp_bar(GameState.player_hp, GameState.player_max_hp)
 	if dice_label:
 		var dice_str = "🎲 "
 		for d in GameState.active_dice:

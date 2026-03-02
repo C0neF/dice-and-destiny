@@ -23,8 +23,14 @@ var poison_stacks: int = 0
 var freeze_timer: float = 0.0
 var slow_factor: float = 1.0
 
-var sprite: Sprite2D
+var sprite
+var anim_sprite: AnimatedSprite2D = null
+var static_sprite: Sprite2D = null
 var hp_bar_fill: ColorRect
+var _anim_time: float = 0.0
+var _anim_seed: float = 0.0
+var _hit_squash_timer: float = 0.0
+var _base_scale: Vector2 = Vector2.ONE
 
 func setup(def: GameData.EnemyDef, player: Node2D, level_scale: float = 1.0):
 	enemy_def = def
@@ -49,14 +55,9 @@ func setup(def: GameData.EnemyDef, player: Node2D, level_scale: float = 1.0):
 		GameData.EnemyType.MIMIC:
 			move_speed = 25.0 + randf() * 15.0  # Slow-moderate
 	
-	# Sprite
-	sprite = Sprite2D.new()
-	sprite.name = "Sprite"
-	var tex = load(def.texture_path)
-	if tex:
-		sprite.texture = tex
-		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	add_child(sprite)
+	# Sprite (animated if frames exist, static fallback otherwise)
+	_anim_seed = randf() * TAU
+	_setup_visual(def.texture_path)
 	
 	# HP bar
 	var bg = ColorRect.new()
@@ -81,6 +82,178 @@ func setup(def: GameData.EnemyDef, player: Node2D, level_scale: float = 1.0):
 	collision_layer = 2
 	collision_mask = 4  # Only collide with obstacles, NOT player (overlap for contact damage)
 
+func _setup_visual(texture_path: String):
+	# 1) Preferred: high-quality external animated sheets (Duelyst)
+	anim_sprite = _build_duelyst_animated_sprite()
+	if not anim_sprite:
+		# 2) Fallback: local frame convention <enemy>/idle_1.png ...
+		anim_sprite = _build_animated_sprite(texture_path)
+	if anim_sprite:
+		sprite = anim_sprite
+		sprite.name = "Sprite"
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		if anim_sprite.has_meta("duelyst"):
+			# Duelyst 帧资源留白较大，整体基础缩放提高
+			_base_scale = Vector2(0.62, 0.62)
+			if enemy_def:
+				if enemy_def.is_boss:
+					_base_scale = Vector2(0.78, 0.78)
+				elif enemy_def.type == GameData.EnemyType.SLIME:
+					# critter_1（史莱姆映射）单独放大
+					_base_scale = Vector2(1.0, 1.0)
+				elif enemy_def.type == GameData.EnemyType.FIRE_ELEMENTAL:
+					# 红色小怪（火元素）进一步放大
+					_base_scale = Vector2(0.92, 0.92)
+				elif enemy_def.type == GameData.EnemyType.GOBLIN:
+					# 常见红色系小怪（哥布林映射）同样放大
+					_base_scale = Vector2(0.92, 0.92)
+		sprite.scale = _base_scale
+		add_child(sprite)
+		return
+
+	# 3) Last fallback: static sprite + procedural bob/squash
+	static_sprite = Sprite2D.new()
+	static_sprite.name = "Sprite"
+	var tex = load(texture_path)
+	if tex:
+		static_sprite.texture = tex
+		static_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	sprite = static_sprite
+	add_child(sprite)
+
+func _build_duelyst_animated_sprite() -> AnimatedSprite2D:
+	var path = _get_duelyst_spriteframes_path()
+	if path == "" or not ResourceLoader.exists(path):
+		return null
+	var frames = load(path)
+	if not (frames is SpriteFrames):
+		return null
+	var s = AnimatedSprite2D.new()
+	s.sprite_frames = frames
+	s.set_meta("duelyst", true)
+	var start_anim = _pick_available_anim(frames, ["idle", "run", "walk", "move", "action"])
+	if start_anim != "":
+		s.play(start_anim)
+	return s
+
+func _get_duelyst_spriteframes_path() -> String:
+	if not enemy_def:
+		return ""
+	match enemy_def.type:
+		GameData.EnemyType.SLIME:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/critter_1.tres"
+		GameData.EnemyType.SKELETON:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/boss_wraith.tres"
+		GameData.EnemyType.BAT:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/neutral_monsterdragonhawk.tres"
+		GameData.EnemyType.GOBLIN:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/neutral_gnasher.tres"
+		GameData.EnemyType.GHOST:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/neutral_ghostlynx.tres"
+		GameData.EnemyType.DEMON:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/boss_treatdemon.tres"
+		GameData.EnemyType.MUSHROOM:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/neutral_blisteringscorn.tres"
+		GameData.EnemyType.MIMIC:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/neutral_deceptib0t.tres"
+		GameData.EnemyType.FIRE_ELEMENTAL:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/neutral_firestarter.tres"
+		GameData.EnemyType.DARK_KNIGHT:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/boss_chaosknight.tres"
+		GameData.EnemyType.ICE_GOLEM:
+			return "res://addons/duelyst_animated_sprites/assets/spriteframes/units/neutral_golemice.tres"
+		_:
+			return ""
+
+func _build_animated_sprite(texture_path: String) -> AnimatedSprite2D:
+	var frames = _build_enemy_sprite_frames(texture_path)
+	if not frames:
+		return null
+	var s = AnimatedSprite2D.new()
+	s.sprite_frames = frames
+	var start_anim = _pick_available_anim(frames, ["idle", "walk", "run"])
+	if start_anim != "":
+		s.play(start_anim)
+	return s
+
+## Optional animated assets convention (any one that exists):
+## - res://assets/sprites/enemies/<enemy_id>/idle_1.png ... idle_N.png
+## - res://assets/sprites/enemies/<enemy_id>/walk_1.png ... walk_N.png
+## - res://assets/sprites/enemies/<enemy_id>/hit_1.png ... hit_N.png
+func _build_enemy_sprite_frames(texture_path: String) -> SpriteFrames:
+	var base_dir = texture_path.get_base_dir()
+	var base_name = texture_path.get_file().get_basename()
+	var anim_dir = base_dir.path_join(base_name)
+
+	var idle_patterns = [
+		"%s/idle_%%d.png" % anim_dir,
+		"%s/%s_idle_%%d.png" % [base_dir, base_name],
+		"%s/%s_%%d.png" % [base_dir, base_name],
+	]
+	var walk_patterns = [
+		"%s/walk_%%d.png" % anim_dir,
+		"%s/run_%%d.png" % anim_dir,
+		"%s/%s_walk_%%d.png" % [base_dir, base_name],
+	]
+	var hit_patterns = [
+		"%s/hit_%%d.png" % anim_dir,
+		"%s/hurt_%%d.png" % anim_dir,
+		"%s/%s_hit_%%d.png" % [base_dir, base_name],
+	]
+
+	var idle_frames = _collect_animation_frames(idle_patterns)
+	if idle_frames.is_empty():
+		return null
+
+	var frames = SpriteFrames.new()
+	frames.add_animation("idle")
+	frames.set_animation_speed("idle", 7.0)
+	frames.set_animation_loop("idle", true)
+	for tex in idle_frames:
+		frames.add_frame("idle", tex)
+
+	var walk_frames = _collect_animation_frames(walk_patterns)
+	if not walk_frames.is_empty():
+		frames.add_animation("walk")
+		frames.set_animation_speed("walk", 10.0)
+		frames.set_animation_loop("walk", true)
+		for tex in walk_frames:
+			frames.add_frame("walk", tex)
+
+	var hit_frames = _collect_animation_frames(hit_patterns)
+	if not hit_frames.is_empty():
+		frames.add_animation("hit")
+		frames.set_animation_speed("hit", 16.0)
+		frames.set_animation_loop("hit", false)
+		for tex in hit_frames:
+			frames.add_frame("hit", tex)
+
+	return frames
+
+func _collect_animation_frames(patterns: Array) -> Array[Texture2D]:
+	for pattern in patterns:
+		var out: Array[Texture2D] = []
+		for i in range(1, 13):
+			var path = pattern % i
+			if ResourceLoader.exists(path):
+				var tex = load(path)
+				if tex:
+					out.append(tex)
+			else:
+				if i == 1:
+					break
+				break
+		if not out.is_empty():
+			return out
+	return []
+
+func _pick_available_anim(frames: SpriteFrames, preferred: Array[String]) -> String:
+	for name in preferred:
+		if frames.has_animation(name):
+			return name
+	var names = frames.get_animation_names()
+	return names[0] if names.size() > 0 else ""
+
 func _physics_process(delta):
 	if not is_instance_valid(target):
 		return
@@ -102,6 +275,7 @@ func _physics_process(delta):
 		freeze_timer -= delta
 		if sprite:
 			sprite.modulate = Color(0.5, 0.7, 1.0)
+		_animate_visual(delta, Vector2.ZERO, false)
 		return
 	
 	# Status ticks
@@ -128,6 +302,41 @@ func _physics_process(delta):
 	# Flip sprite
 	if sprite and dir.x != 0:
 		sprite.flip_h = dir.x < 0
+	
+	_animate_visual(delta, dir, true)
+
+func _animate_visual(delta: float, _dir: Vector2, can_move: bool):
+	if not sprite:
+		return
+
+	_anim_time += delta
+	if _hit_squash_timer > 0:
+		_hit_squash_timer = max(0.0, _hit_squash_timer - delta)
+
+	var moving = can_move and velocity.length() > 8.0
+	if anim_sprite and anim_sprite.sprite_frames:
+		var frames = anim_sprite.sprite_frames
+		var target_anim = ""
+		if _hit_squash_timer > 0:
+			target_anim = _pick_available_anim(frames, ["hit", "attack", "action", "idle", "run", "walk"])
+		elif moving:
+			target_anim = _pick_available_anim(frames, ["walk", "run", "move", "idle"])
+		else:
+			target_anim = _pick_available_anim(frames, ["idle", "run", "walk", "move"])
+		if target_anim != "" and anim_sprite.animation != target_anim:
+			anim_sprite.play(target_anim)
+
+	var bob_speed = 10.0 if moving else 5.0
+	var bob_amp = 1.1 if moving else 0.45
+	var squash_amp = 0.045 if moving else 0.02
+
+	if _hit_squash_timer > 0:
+		bob_amp += 0.6
+		squash_amp += 0.08
+
+	var wave = sin(_anim_time * bob_speed + _anim_seed)
+	sprite.position.y = wave * bob_amp
+	sprite.scale = Vector2(_base_scale.x * (1.0 + squash_amp * wave), _base_scale.y * (1.0 - squash_amp * wave))
 
 var _status_tick_acc: float = 0.0
 func _tick_status(delta):
@@ -146,6 +355,7 @@ func _tick_status(delta):
 func take_damage(amount: int, knockback_dir: Vector2 = Vector2.ZERO):
 	hp -= amount
 	flash_timer = 0.2
+	_hit_squash_timer = 0.16
 	knockback_vel = knockback_dir * 150
 	
 	if hp_bar_fill:

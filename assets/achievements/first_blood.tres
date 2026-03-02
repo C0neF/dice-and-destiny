@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="Achievement" format=3]
+
+[ext_resource type="Script" path="res://addons/milestone/scripts/achievements/achievement.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://assets/sprites/status/status_strength.png" id="2_icon"]
+
+[resource]
+script = ExtResource("1_script")
+id = "first_blood"
+icon = ExtResource("2_icon")
+icon_filter = 0
+name = "初见杀"
+description = "击败你的第一个敌人。"
+progress_goal = 1
+metadata/_custom_type_script = "res://addons/milestone/scripts/achievements/achievement.gd"

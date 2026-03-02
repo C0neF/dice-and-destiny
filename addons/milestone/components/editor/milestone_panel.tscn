@@ -1,0 +1,540 @@
+[gd_scene format=3 uid="uid://b35o10vjk7vse"]
+
+[ext_resource type="Script" uid="uid://c8p1sd0scafee" path="res://addons/milestone/scripts/milestone_editor/milestone_panel.gd" id="1_qfjv7"]
+[ext_resource type="PackedScene" uid="uid://dhdqvikxt7uvu" path="res://addons/milestone/components/achievement_notification.tscn" id="3_cg0tt"]
+[ext_resource type="Texture2D" uid="uid://ddu6571nd8sv5" path="res://addons/milestone/icons/editor/new_achievement.svg" id="3_on843"]
+[ext_resource type="PackedScene" uid="uid://b2ygwvy3dv00a" path="res://addons/milestone/components/achievement_display.tscn" id="3_q5u40"]
+[ext_resource type="PackedScene" uid="uid://76j1kceq4xk8" path="res://addons/milestone/components/editor/milestone_setting.tscn" id="5_uwxb5"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_2fac8"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_qfjv7"]
+content_margin_top = 0.0
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_qcoj7"]
+
+[sub_resource type="ImageTexture" id="ImageTexture_ej1is"]
+
+[sub_resource type="DPITexture" id="DPITexture_on843"]
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"m5 9 5.5-5.5L8 1h7v7l-2.5-2.5L7 11zm7 6H4a3 3 0 0 1-3-3V4a3 3 0 0 1 3-3h2a1 1 0 0 1 0 2H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2a1 1 0 0 1 2 0v2a3 3 0 0 1-3 3z\"/></svg>
+"
+saturation = 2.0
+color_map = {
+Color(1, 0.37254903, 0.37254903, 1): Color(1, 0.47, 0.42, 1),
+Color(0.37254903, 1, 0.5921569, 1): Color(0.45, 0.95, 0.5, 1),
+Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
+}
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_on843"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_uwxb5"]
+content_margin_left = 10.0
+content_margin_top = 2.0
+content_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_on843"]
+content_margin_left = 8.0
+content_margin_top = 8.0
+content_margin_right = 8.0
+content_margin_bottom = 8.0
+bg_color = Color(0.25009245, 0.25009245, 0.25009245, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="MilestonePanel" type="PanelContainer" unique_id=1148435699]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxEmpty_2fac8")
+script = ExtResource("1_qfjv7")
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=1581092524]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 4
+
+[node name="PanelContainer" type="PanelContainer" parent="MarginContainer" unique_id=159534913]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxEmpty_qfjv7")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer" unique_id=264143691]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TabContainer" type="TabContainer" parent="MarginContainer/PanelContainer/VBoxContainer" unique_id=33324398]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"TabContainerInner"
+current_tab = 0
+
+[node name="Achievements" type="MarginContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer" unique_id=895033185]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+metadata/_tab_index = 0
+
+[node name="SplitContainer" type="SplitContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements" unique_id=1034053535]
+layout_mode = 2
+
+[node name="BoxContainer" type="BoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer" unique_id=1107627704]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.3
+vertical = true
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer" unique_id=2070575789]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+
+[node name="NewAchievement" type="Button" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer/HBoxContainer" unique_id=1923524481]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+tooltip_text = "Create a new achievement"
+theme_type_variation = &"RunBarButton"
+icon = ExtResource("3_on843")
+icon_alignment = 1
+
+[node name="DeleteAchievementButton" type="Button" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer/HBoxContainer" unique_id=739176645]
+unique_name_in_owner = true
+modulate = Color(1, 0.4, 0.47843137, 1)
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+size_flags_horizontal = 8
+tooltip_text = "Delete achievement"
+theme_type_variation = &"RunBarButton"
+theme_override_colors/icon_pressed_color = Color(1.15, 1.15, 1.15, 1)
+theme_override_colors/icon_hover_pressed_color = Color(1.15, 1.15, 1.15, 1)
+icon_alignment = 1
+
+[node name="FilterLineEdit" type="LineEdit" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer/HBoxContainer" unique_id=931415907]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Filter achievements by their ID. Filtering is case-insensitive."
+theme_override_constants/minimum_character_width = 0
+placeholder_text = "Filter Achievements"
+clear_button_enabled = true
+icon_expand_mode = 2
+right_icon_scale = 0.6
+
+[node name="PanelContainer" type="PanelContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer" unique_id=722360081]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxEmpty_qcoj7")
+
+[node name="BoxContainer" type="BoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer/PanelContainer" unique_id=110197837]
+layout_mode = 2
+vertical = true
+
+[node name="AchievementsTree" type="Tree" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer/PanelContainer/BoxContainer" unique_id=643558217]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"TreeSecondary"
+theme_override_icons/select_arrow = SubResource("ImageTexture_ej1is")
+columns = 2
+allow_rmb_select = true
+hide_folding = true
+hide_root = true
+select_mode = 2
+scroll_hint_mode = 1
+
+[node name="BoxContainer" type="BoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer/PanelContainer/BoxContainer" unique_id=1468278641]
+layout_mode = 2
+size_flags_vertical = 8
+theme_override_constants/separation = 12
+
+[node name="VersionNumber" type="LinkButton" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer/PanelContainer/BoxContainer/BoxContainer" unique_id=1943720620]
+unique_name_in_owner = true
+self_modulate = Color(1, 1, 1, 0.588235)
+layout_mode = 2
+size_flags_vertical = 4
+tooltip_text = "Open Milestone repository"
+text = "{version}"
+underline = 1
+uri = "https://github.com/jelolul/milestone"
+
+[node name="DocsButton" type="Button" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer/PanelContainer/BoxContainer/BoxContainer" unique_id=1221796747]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 10
+size_flags_vertical = 4
+tooltip_text = "Open Milestone documentation"
+theme_type_variation = &"RunBarButton"
+text = "Docs"
+icon = SubResource("DPITexture_on843")
+
+[node name="BoxContainer2" type="BoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer" unique_id=238537289]
+custom_minimum_size = Vector2(500, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+vertical = true
+
+[node name="PanelContainer2" type="PanelContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2" unique_id=1711597728]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxEmpty_on843")
+
+[node name="SettingsContainer" type="MarginContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2" unique_id=582010400]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="BoxContainer" type="BoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer" unique_id=280000882]
+layout_mode = 2
+vertical = true
+
+[node name="PreviewLabel" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer" unique_id=2144464327]
+layout_mode = 2
+mouse_filter = 1
+theme_type_variation = &"HeaderSmall"
+theme_override_styles/normal = SubResource("StyleBoxEmpty_uwxb5")
+text = "Preview"
+vertical_alignment = 1
+
+[node name="PreviewPanelContainer" type="PanelContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer" unique_id=1288581934]
+clip_contents = true
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"TreeSecondary"
+
+[node name="BoxContainer" type="BoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/PreviewPanelContainer" unique_id=375157991]
+layout_mode = 2
+vertical = true
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/PreviewPanelContainer/BoxContainer" unique_id=1372415891]
+layout_mode = 2
+size_flags_vertical = 3
+vertical_scroll_mode = 0
+
+[node name="BoxContainer" type="BoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/PreviewPanelContainer/BoxContainer/ScrollContainer" unique_id=1238091979]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="AchievementNotification" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/PreviewPanelContainer/BoxContainer/ScrollContainer/BoxContainer" unique_id=43426553 instance=ExtResource("3_cg0tt")]
+unique_name_in_owner = true
+z_index = 0
+layout_mode = 2
+size_flags_horizontal = 1
+size_flags_vertical = 3
+
+[node name="AchievementDisplay" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/PreviewPanelContainer/BoxContainer/ScrollContainer/BoxContainer" unique_id=1056186304 instance=ExtResource("3_q5u40")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 1
+
+[node name="SettingsLabel" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer" unique_id=466079982]
+layout_mode = 2
+mouse_filter = 1
+theme_type_variation = &"HeaderSmall"
+theme_override_styles/normal = SubResource("StyleBoxEmpty_uwxb5")
+text = "Settings"
+vertical_alignment = 1
+
+[node name="SettingsPanelContainer" type="PanelContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer" unique_id=2107100409]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"TreeSecondary"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer" unique_id=1287699698]
+layout_mode = 2
+size_flags_vertical = 3
+focus_mode = 1
+mouse_filter = 0
+
+[node name="SettingsList" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer" unique_id=316258879]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="SectionGeneral" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList" unique_id=1642916147]
+layout_mode = 2
+theme_type_variation = &"HeaderSmall"
+text = "General"
+
+[node name="GeneralContainer" type="MarginContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList" unique_id=1339223430]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/GeneralContainer" unique_id=87047844]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="IDSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/GeneralContainer/VBoxContainer" unique_id=1216582495 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The ID of the achievement, used when unlocking or progressing via code.
+It must be unique from other achievements."
+setting_name = "ID"
+setting_description = "The ID of the achievement, used when unlocking or progressing via code.
+It must be unique from other achievements."
+placeholder_text = "achievement_id"
+
+[node name="GroupIDSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/GeneralContainer/VBoxContainer" unique_id=726054999 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The ID of the group this achievement belongs to.
+Achievements in the same group can be progressed together."
+setting_name = "Group ID"
+setting_description = "The ID of the group this achievement belongs to.
+Achievements in the same group can be progressed together."
+placeholder_text = "group_01"
+
+[node name="NameSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/GeneralContainer/VBoxContainer" unique_id=516358959 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The human-readable name displayed for this achievement."
+setting_name = "Name"
+setting_description = "The human-readable name displayed for this achievement."
+placeholder_text = "Achievement Name"
+
+[node name="DescSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/GeneralContainer/VBoxContainer" unique_id=733482739 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The description displayed in the achievements list."
+setting_name = "Description"
+setting_description = "The description displayed in the achievements list."
+placeholder_text = "Achievement Description"
+
+[node name="SectionVisibilityAndRarity" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList" unique_id=707590205]
+layout_mode = 2
+theme_type_variation = &"HeaderSmall"
+text = "Visibility & Rarity"
+
+[node name="VisiblityAndRarityContainer" type="MarginContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList" unique_id=1254798365]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/VisiblityAndRarityContainer" unique_id=1307606683]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="HiddenSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/VisiblityAndRarityContainer/VBoxContainer" unique_id=1899725469 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Marks the achievement as hidden."
+setting_name = "Hidden"
+setting_description = "Marks the achievement as hidden."
+setting_type = 2
+toggle_text = "On"
+
+[node name="ConsideredRareSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/VisiblityAndRarityContainer/VBoxContainer" unique_id=1881982753 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Marks the achievement as rare or difficult to unlock."
+setting_name = "Considered Rare"
+setting_description = "Marks the achievement as rare or difficult to unlock."
+setting_type = 2
+toggle_text = "On"
+
+[node name="SectionProgress" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList" unique_id=795824641]
+layout_mode = 2
+theme_type_variation = &"HeaderSmall"
+text = "Progress"
+
+[node name="ProgressContainer" type="MarginContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList" unique_id=1141234233]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/ProgressContainer" unique_id=1276297509]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="ProgressiveSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/ProgressContainer/VBoxContainer" unique_id=1995420235 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Whether the achievement can be progressed."
+setting_name = "Progressive"
+setting_description = "Whether the achievement can be progressed."
+setting_type = 2
+toggle_text = "On"
+
+[node name="ProgressGoalSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/ProgressContainer/VBoxContainer" unique_id=1063006157 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The amount of progress required to unlock the achievement."
+setting_name = "Progress Goal"
+setting_description = "The amount of progress required to unlock the achievement."
+setting_type = 3
+toggle_text = "On"
+spin_box_min = 1
+spin_box_max = 2147483647
+
+[node name="IndicateProgressIntervalSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/ProgressContainer/VBoxContainer" unique_id=2014724551 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The interval at which progress popup is displayed."
+setting_name = "Indicate Progress Interval"
+setting_description = "The interval at which progress popup is displayed."
+setting_type = 3
+spin_box_min = 1
+spin_box_max = 2147483647
+
+[node name="SectionIcon" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList" unique_id=934850216]
+layout_mode = 2
+theme_type_variation = &"HeaderSmall"
+text = "Icons"
+
+[node name="IconContainer" type="MarginContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList" unique_id=791571713]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/IconContainer" unique_id=587490871]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="IconFilterSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/IconContainer/VBoxContainer" unique_id=1566731309 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The texture filter that the achievement icon should use.
+It's recommened to use Nearest for pixel art icons."
+setting_name = "Icon Filter"
+setting_description = "The texture filter that the achievement icon should use.
+It's recommened to use Nearest for pixel art icons."
+setting_type = 4
+
+[node name="IconSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/IconContainer/VBoxContainer" unique_id=514763365 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+setting_name = "Icon"
+setting_type = 1
+base_type = "Texture2D"
+
+[node name="UnachievedIconSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/IconContainer/VBoxContainer" unique_id=302496070 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The icon that is displayed when the achievement isn't unlocked.
+When unset, it uses the icon set with the Icon Setting, with a grayscale filter."
+setting_name = "Unachieved Icon"
+setting_description = "The icon that is displayed when the achievement isn't unlocked.
+When unset, it uses the icon set with the Icon Setting, with a grayscale filter."
+setting_type = 1
+base_type = "Texture2D"
+
+[node name="HiddenIconSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2/SettingsContainer/BoxContainer/SettingsPanelContainer/ScrollContainer/SettingsList/IconContainer/VBoxContainer" unique_id=1834398250 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "The icon that is displayed when the achievement is hidden.
+When unset, it uses the default 'milestone/icons/hidden_achievement.svg' icon."
+setting_name = "Hidden Icon"
+setting_description = "The icon that is displayed when the achievement is hidden.
+When unset, it uses the default 'milestone/icons/hidden_achievement.svg' icon."
+setting_type = 1
+base_type = "Texture2D"
+
+[node name="NotSelectedLabel" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2" unique_id=289393252]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "Create a new achievement / Select an achievement"
+horizontal_alignment = 1
+
+[node name="MultiSelectingLabel" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Achievements/SplitContainer/BoxContainer2/PanelContainer2" unique_id=1709724929]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "Selecting more than one achievement."
+horizontal_alignment = 1
+
+[node name="Settings" type="MarginContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer" unique_id=1612693932]
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+metadata/_tab_index = 1
+
+[node name="PanelContainer" type="PanelContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings" unique_id=1109546429]
+custom_minimum_size = Vector2(500, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TreeSecondary"
+
+[node name="SettingsContainer" type="MarginContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer" unique_id=1561330595]
+layout_mode = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer/SettingsContainer" unique_id=233486047]
+layout_mode = 2
+
+[node name="SettingsContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer/SettingsContainer/ScrollContainer" unique_id=1333850260]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="Note" type="RichTextLabel" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer/SettingsContainer/ScrollContainer/SettingsContainer" unique_id=2112364620]
+modulate = Color(1, 0.93333334, 0.54901963, 1)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_on843")
+bbcode_enabled = true
+text = "Since this is still in beta, I'd recommend making frequent backups and/or use Version Control.
+
+Report any bugs/crashes you find on [b][url=https://github.com/jelolul/milestone/issues]GitHub[/url][/b]"
+fit_content = true
+scroll_active = false
+
+[node name="AchievementsFolderSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer/SettingsContainer/ScrollContainer/SettingsContainer" unique_id=2033474071 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(450, 0)
+layout_mode = 2
+setting_name = "Achievements Folder"
+setting_type = 6
+button_text = "Change..."
+path_button_text = "Change Folder"
+path_button_line_edit_placeholder_text = "res://achievements/"
+path_button_line_edit_editable = false
+
+[node name="SaveAsJsonSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer/SettingsContainer/ScrollContainer/SettingsContainer" unique_id=1579329809 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(450, 0)
+layout_mode = 2
+tooltip_text = "Storing achievements as JSON means anyone can edit it.
+It's recommended to store it in an encrypted binary file."
+setting_name = "Save As JSON"
+setting_description = "Storing achievements as JSON means anyone can edit it.
+It's recommended to store it in an encrypted binary file."
+display_setting_description = true
+setting_type = 2
+
+[node name="PrintErrorsSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer/SettingsContainer/ScrollContainer/SettingsContainer" unique_id=1484584334 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(450, 0)
+layout_mode = 2
+setting_name = "Print Errors"
+setting_type = 2
+
+[node name="PrintOutputSetting" parent="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer/SettingsContainer/ScrollContainer/SettingsContainer" unique_id=408412341 instance=ExtResource("5_uwxb5")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(450, 0)
+layout_mode = 2
+setting_name = "Print Output"
+setting_type = 2
+
+[connection signal="meta_clicked" from="MarginContainer/PanelContainer/VBoxContainer/TabContainer/Settings/PanelContainer/SettingsContainer/ScrollContainer/SettingsContainer/Note" to="." method="_on_settings_note_meta_clicked"]

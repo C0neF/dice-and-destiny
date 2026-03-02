@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="Achievement" format=3]
+
+[ext_resource type="Script" path="res://addons/milestone/scripts/achievements/achievement.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://assets/sprites/relics/relic_crystal_ball.png" id="2_icon"]
+
+[resource]
+script = ExtResource("1_script")
+id = "relic_collector"
+icon = ExtResource("2_icon")
+icon_filter = 0
+name = "遗物收藏家"
+description = "在单局中获得 5 件遗物。"
+progressive = true
+progress_goal = 5
+indicate_progress_interval = 1
+metadata/_custom_type_script = "res://addons/milestone/scripts/achievements/achievement.gd"

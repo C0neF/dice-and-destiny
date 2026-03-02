@@ -1,7 +1,7 @@
 ## Pickup drop item - spawns from dead enemies, player walks over to collect
 extends Area2D
 
-signal collected(drop_type: String, value: int)
+signal collected(drop_type: int, value: int)
 
 enum DropType { GOLD, HEALTH_POTION, SPEED_BOOST, DAMAGE_BOOST, ENERGY_ORB, MAGNET, BOMB }
 
@@ -61,7 +61,10 @@ func _ready():
 	icon_label.z_index = 1
 	add_child(icon_label)
 	
-	# Collision for pickup
+	# Collision setup is deferred to avoid "flushing queries" errors
+	call_deferred("_setup_collision")
+
+func _setup_collision():
 	var col = CollisionShape2D.new()
 	var shape = CircleShape2D.new()
 	shape.radius = 10.0  # Generous pickup radius
@@ -72,7 +75,8 @@ func _ready():
 	collision_mask = 1  # Detect player on layer 1
 	set_deferred("monitoring", true)
 	set_deferred("monitorable", false)
-	body_entered.connect(_on_body_entered)
+	if not body_entered.is_connected(_on_body_entered):
+		body_entered.connect(_on_body_entered)
 
 func _physics_process(delta):
 	# Spawn scatter animation
@@ -135,7 +139,13 @@ func _spawn_collect_particles():
 		p.position = global_position - Vector2(1, 1)
 		p.color = color
 		p.z_index = 20
-		get_parent().add_child(p)
+		var fx_parent: Node = get_parent()
+		if fx_parent and fx_parent.name == "Drops" and fx_parent.get_parent():
+			fx_parent = fx_parent.get_parent()
+		if fx_parent:
+			fx_parent.add_child(p)
+		else:
+			add_child(p)
 		var tween = p.create_tween()
 		var dir = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized() * 15
 		tween.tween_property(p, "position", p.position + dir, 0.3)

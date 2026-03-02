@@ -205,6 +205,17 @@ func _create_popup(title_text: String, width: float = 520.0, height: float = 420
 	panel.position = Vector2(-width / 2.0, -height / 2.0)
 	_popup_layer.add_child(panel)
 	
+	# UI Juicer: subtle popup fade-in animation
+	var fader_script = load("res://addons/uiJuicer/Fader.gd")
+	if fader_script:
+		var popup_fader = fader_script.new()
+		popup_fader.AutoFadeIn = true
+		popup_fader.StartVisible = false
+		popup_fader.FadeInTime = 0.16
+		popup_fader.FadeOutTime = 0.12
+		popup_fader.ChangeVisibility = false
+		panel.add_child(popup_fader)
+	
 	var margin = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 20)
 	margin.add_theme_constant_override("margin_right", 20)

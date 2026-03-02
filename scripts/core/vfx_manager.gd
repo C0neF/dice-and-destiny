@@ -3,6 +3,12 @@ extends CanvasLayer
 
 var color_rect: ColorRect
 var transition_rect: ColorRect
+var flash_rect: ColorRect
+var transition_material: ShaderMaterial
+var use_universal_transition: bool = false
+
+const TRANSITION_BLOCKED := 0.0
+const TRANSITION_CLEAR := 2.0
 
 var shake_amount: float = 0.0
 var shake_decay: float = 5.0
@@ -82,29 +88,74 @@ void fragment() {
 	color_rect.material = mat
 	add_child(color_rect)
 
-## Screen transition (fade in/out)
+## Screen transition + flash layer
 func _setup_transition():
 	transition_rect = ColorRect.new()
 	transition_rect.name = "TransitionRect"
 	transition_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	transition_rect.color = Color(0, 0, 0, 0)
+	transition_rect.color = Color.BLACK
 	transition_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	
+	var transition_shader = load("res://assets/shaders/universal_transition.gdshader")
+	if transition_shader:
+		transition_material = ShaderMaterial.new()
+		transition_material.shader = transition_shader
+		transition_material.set_shader_parameter("use_sprite_alpha", false)
+		transition_material.set_shader_parameter("use_transition_texture", false)
+		transition_material.set_shader_parameter("transition_type", 2) # Shape
+		transition_material.set_shader_parameter("edges", 6) # Hex-like wipe
+		transition_material.set_shader_parameter("shape_feather", 0.35)
+		transition_material.set_shader_parameter("position", Vector2(0.5, 0.5))
+		transition_material.set_shader_parameter("progress", TRANSITION_CLEAR)
+		transition_rect.material = transition_material
+		transition_rect.visible = false # hide expensive full-screen shader when idle
+		use_universal_transition = true
+	else:
+		transition_rect.color = Color(0, 0, 0, 0)
+	
 	add_child(transition_rect)
+	
+	flash_rect = ColorRect.new()
+	flash_rect.name = "FlashRect"
+	flash_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flash_rect.color = Color(0, 0, 0, 0)
+	flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(flash_rect)
 
 func fade_out(duration: float = 0.5) -> void:
-	transition_rect.color = Color(0, 0, 0, transition_rect.color.a)  # Reset to black
-	var tween = create_tween()
-	tween.tween_property(transition_rect, "color:a", 1.0, duration)
-	await tween.finished
+	if use_universal_transition and transition_material:
+		transition_rect.visible = true
+		transition_material.set_shader_parameter("progress", TRANSITION_CLEAR)
+		var tween = create_tween()
+		tween.tween_property(transition_material, "shader_parameter/progress", TRANSITION_BLOCKED, duration)
+		await tween.finished
+		return
+	
+	transition_rect.visible = true
+	transition_rect.color = Color(0, 0, 0, transition_rect.color.a)
+	var fallback = create_tween()
+	fallback.tween_property(transition_rect, "color:a", 1.0, duration)
+	await fallback.finished
 
 func fade_in(duration: float = 0.5) -> void:
-	transition_rect.color = Color(0, 0, 0, 1.0)  # Ensure black, not red
-	var tween = create_tween()
-	tween.tween_property(transition_rect, "color:a", 0.0, duration)
-	await tween.finished
+	if use_universal_transition and transition_material:
+		transition_rect.visible = true
+		transition_material.set_shader_parameter("progress", TRANSITION_BLOCKED)
+		var tween = create_tween()
+		tween.tween_property(transition_material, "shader_parameter/progress", TRANSITION_CLEAR, duration)
+		await tween.finished
+		transition_rect.visible = false
+		return
+	
+	transition_rect.visible = true
+	transition_rect.color = Color(0, 0, 0, 1.0)
+	var fallback = create_tween()
+	fallback.tween_property(transition_rect, "color:a", 0.0, duration)
+	await fallback.finished
+	transition_rect.visible = false
 
 ## Flash effect for hits
 func flash_screen(color: Color = Color(1, 0.2, 0.2, 0.3), duration: float = 0.1):
-	transition_rect.color = color
+	flash_rect.color = color
 	var tween = create_tween()
-	tween.tween_property(transition_rect, "color:a", 0.0, duration)
+	tween.tween_property(flash_rect, "color:a", 0.0, duration)
