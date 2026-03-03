@@ -59,7 +59,7 @@ var strings: Dictionary = {
 		# Card names
 		"card_strike": "斩击",
 		"card_heavy_strike": "重击",
-		"card_block": "格挡",
+		"card_block": "闪现",
 		"card_fortress": "堡垒",
 		"card_fireball": "火球术",
 		"card_ice_shard": "冰晶",

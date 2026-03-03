@@ -7,8 +7,8 @@ signal run_over(victory: bool)
 const ARENA_SIZE = Vector2(640, 360)
 # Wall-interior bounds (matching the current survivor_arena_bg wall inner edges)
 # Tuned for the 1376x768 replacement map scaled to 720x440 at (-40, -40).
-const ARENA_MIN = Vector2(-5, 40)
-const ARENA_MAX = Vector2(645, 360)
+const ARENA_MIN = Vector2(-5, 20)
+const ARENA_MAX = Vector2(645, 340)
 const SPAWN_MARGIN = 40.0
 const WALL_THICKNESS = 40.0  # Collision wall thickness (placed outside playable area)
 const MAGE_COLOR_PRIMARY := Color(0.74, 0.44, 1.0, 0.95)
@@ -48,11 +48,29 @@ var _spirit_sword_timer: float = 0.0
 var _earthquake_timer: float = 0.0
 var _vampiric_aura_timer: float = 0.0
 var _orbit_visual: Node2D
+var _temp_slow_effects: Dictionary = {}  # enemy_id -> {"enemy": Node2D, "until": float, "factor": float}
+
+# Survivor permanent point upgrades from shop
+var bonus_attack_points: int = 0
+var bonus_armor_points: int = 0
+
+# In-run total purchase counters (used for cross-wave price growth)
+var shop_heal_buy_count: int = 0
+var shop_upgrade_buy_count: int = 0
+var shop_attack_point_buy_count: int = 0
+var shop_armor_point_buy_count: int = 0
+
+# Per-shop purchase flags (reset each wave shop)
+var shop_heal_bought_this_shop: bool = false
+var shop_upgrade_bought_this_shop: bool = false
+var shop_attack_point_bought_this_shop: bool = false
+var shop_armor_point_bought_this_shop: bool = false
 
 # Wave state
 var current_wave: int = 0
 var wave_timer: float = 0.0
 var wave_duration: float = 45.0  # Seconds per wave
+var is_hard_mode: bool = false
 var enemies_alive: int = 0
 var spawn_timer: float = 0.0
 var spawn_interval: float = 1.5
@@ -79,13 +97,35 @@ var dice_label: Label
 var card_panels: Array = []
 var log_label: RichTextLabel
 
+# Skill test mode
+var is_skill_test_mode: bool = false
+var skill_test_panel: PanelContainer = null
+var skill_test_level: int = 3
+const SKILL_TEST_ATTACKS = [
+	{"id":"orbit_blades", "name_zh":"旋转刀刃", "name_en":"Orbit Blades"},
+	{"id":"chain_lightning_passive", "name_zh":"连锁闪电", "name_en":"Chain Lightning"},
+	{"id":"flame_tornado", "name_zh":"火焰旋风", "name_en":"Flame Tornado"},
+	{"id":"ice_nova", "name_zh":"冰霜新星", "name_en":"Ice Nova"},
+	{"id":"poison_cloud", "name_zh":"毒雾", "name_en":"Poison Cloud"},
+	{"id":"holy_cross", "name_zh":"圣光十字", "name_en":"Holy Cross"},
+	{"id":"meteor_rain", "name_zh":"陨石雨", "name_en":"Meteor Rain"},
+	{"id":"spirit_sword", "name_zh":"灵魂飞剑", "name_en":"Spirit Sword"},
+	{"id":"earthquake", "name_zh":"地震", "name_en":"Earthquake"},
+	{"id":"vampiric_aura", "name_zh":"吸血光环", "name_en":"Vampiric Aura"},
+]
+
 func _ready():
 	# Allow this node to process input even when tree is paused
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	is_skill_test_mode = (GameState.run_mode == "survivor_test")
+	is_hard_mode = (GameState.survivor_difficulty == "hard")
 	_setup_arena()
 	_setup_player()
 	_setup_ui()
-	_start_wave(1)
+	if is_skill_test_mode:
+		_start_skill_test_mode()
+	else:
+		_start_wave(1)
 	VFX.fade_in(0.4)
 	SFX.play_bgm("battle")
 
@@ -95,6 +135,152 @@ func _unhandled_input(event):
 			_resume_game()
 		elif not is_shopping:
 			_pause_game()
+
+func _start_skill_test_mode():
+	current_wave = 1
+	wave_timer = 9999.0
+	spawn_timer = 9999.0
+	is_wave_active = true
+	is_shopping = false
+	GameState.roll_all_dice()
+	current_dice_bonus = _calc_dice_bonus()
+	for p in card_panels:
+		if is_instance_valid(p):
+			p.visible = false
+	add_log("[color=cyan]🧪 技能测试模式：点击右侧技能按钮释放效果[/color]")
+	_setup_skill_test_panel()
+	_spawn_skill_test_targets()
+
+func _setup_skill_test_panel():
+	if not hud:
+		return
+	skill_test_panel = PanelContainer.new()
+	skill_test_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	skill_test_panel.position = Vector2(-300, 16)
+	skill_test_panel.size = Vector2(284, 420)
+	skill_test_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	hud.add_child(skill_test_panel)
+	
+	var m = MarginContainer.new()
+	m.add_theme_constant_override("margin_left", 10)
+	m.add_theme_constant_override("margin_right", 10)
+	m.add_theme_constant_override("margin_top", 10)
+	m.add_theme_constant_override("margin_bottom", 10)
+	skill_test_panel.add_child(m)
+	
+	var vb = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 6)
+	m.add_child(vb)
+	
+	var title = Label.new()
+	title.text = ("技能测试" if Loc.current_lang == "zh" else "Skill Test")
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color(1.0, 0.88, 0.5))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	
+	var hint = Label.new()
+	hint.text = (("点击技能立即释放（Lv%d）" % skill_test_level) if Loc.current_lang == "zh" else ("Click a skill to cast instantly (Lv%d)" % skill_test_level))
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", Color(0.75, 0.8, 0.9))
+	vb.add_child(hint)
+	
+	var btn_grid = GridContainer.new()
+	btn_grid.columns = 2
+	btn_grid.add_theme_constant_override("h_separation", 6)
+	btn_grid.add_theme_constant_override("v_separation", 6)
+	vb.add_child(btn_grid)
+	
+	for s in SKILL_TEST_ATTACKS:
+		var b = Button.new()
+		b.custom_minimum_size = Vector2(126, 34)
+		b.text = str(s["name_zh"]) if Loc.current_lang == "zh" else str(s["name_en"])
+		var sid = str(s["id"])
+		b.pressed.connect(func(): _cast_skill_test(sid))
+		btn_grid.add_child(b)
+	
+	var refresh_btn = Button.new()
+	refresh_btn.custom_minimum_size = Vector2(0, 34)
+	refresh_btn.text = ("刷新靶子" if Loc.current_lang == "zh" else "Respawn Targets")
+	refresh_btn.pressed.connect(_respawn_skill_test_targets)
+	vb.add_child(refresh_btn)
+	
+	var back_btn = Button.new()
+	back_btn.custom_minimum_size = Vector2(0, 34)
+	back_btn.text = ("返回主菜单" if Loc.current_lang == "zh" else "Back to Menu")
+	back_btn.pressed.connect(func():
+		GameState.run_mode = "survivor"
+		get_tree().change_scene_to_file("res://scenes/main/main_menu.tscn")
+	)
+	vb.add_child(back_btn)
+
+func _respawn_skill_test_targets():
+	for e in enemy_container.get_children():
+		if is_instance_valid(e):
+			e.queue_free()
+	_spawn_skill_test_targets()
+
+func _spawn_skill_test_targets():
+	var enemy_ids = ["slime", "mushroom", "skeleton", "goblin", "bat", "ghost"]
+	var radius = 120.0
+	for i in range(enemy_ids.size()):
+		var angle = TAU * float(i) / float(enemy_ids.size())
+		var pos = player.global_position + Vector2(cos(angle), sin(angle)) * radius
+		_spawn_test_enemy(enemy_ids[i], pos)
+
+func _spawn_test_enemy(enemy_id: String, spawn_pos: Vector2):
+	var def = GameData.ENEMIES.get(enemy_id)
+	if not def:
+		return
+	var enemy_scene = CharacterBody2D.new()
+	var script = load("res://scripts/battle/enemy_unit.gd")
+	enemy_scene.set_script(script)
+	enemy_scene.position = spawn_pos
+	enemy_container.add_child(enemy_scene)
+	enemy_scene.add_to_group("enemies")
+	enemy_scene.setup(def, player, 0.8)
+	enemy_scene.arena_min = ARENA_MIN
+	enemy_scene.arena_max = ARENA_MAX
+	enemy_scene.died.connect(func(_enemy, _pos):
+		if not is_skill_test_mode:
+			return
+		var respawn_id = enemy_id
+		get_tree().create_timer(0.9).timeout.connect(func():
+			if is_skill_test_mode and is_instance_valid(self):
+				var jitter = Vector2(randf_range(-60, 60), randf_range(-40, 40))
+				var base = player.global_position + Vector2(randf_range(-160, 160), randf_range(-120, 120))
+				_spawn_test_enemy(respawn_id, base + jitter)
+		)
+	)
+
+func _cast_skill_test(skill_id: String):
+	var lvl = skill_test_level
+	match skill_id:
+		"orbit_blades":
+			_orbit_timer += 0.25
+			_update_orbit_blades(lvl)
+		"chain_lightning_passive":
+			_fire_chain_lightning(lvl)
+		"flame_tornado":
+			_spawn_flame_tornado(lvl)
+		"ice_nova":
+			_fire_ice_nova(lvl)
+		"poison_cloud":
+			_apply_poison_cloud(lvl)
+		"holy_cross":
+			_fire_holy_cross(lvl)
+		"meteor_rain":
+			_drop_meteors(lvl)
+		"spirit_sword":
+			_fire_spirit_swords(lvl)
+		"earthquake":
+			_trigger_earthquake(lvl)
+		"vampiric_aura":
+			_apply_vampiric_aura(lvl)
+		_:
+			return
+	add_log("[color=violet]🧪 释放技能：%s[/color]" % skill_id)
 
 func _setup_arena():
 	# Background - use generated dungeon map
@@ -290,9 +476,9 @@ func _setup_ui():
 	# Bottom-right log
 	log_label = RichTextLabel.new()
 	log_label.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	log_label.position = Vector2(-280, -160)
-	log_label.size = Vector2(260, 140)
-	log_label.add_theme_font_size_override("normal_font_size", 12)
+	log_label.position = Vector2(-250, -230)
+	log_label.size = Vector2(190, 96)
+	log_label.add_theme_font_size_override("normal_font_size", 10)
 	log_label.bbcode_enabled = true
 	log_label.scroll_following = true
 	log_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -349,17 +535,20 @@ func _process(delta):
 		return
 	
 	if is_wave_active:
-		_update_wave(delta)
+		if not is_skill_test_mode:
+			_update_wave(delta)
 		_update_dice(delta)
-		_update_auto_attack(delta)
-		_update_passive_attacks(delta)
+		if not is_skill_test_mode:
+			_update_auto_attack(delta)
+			_update_passive_attacks(delta)
+			_handle_card_input()
+			_update_card_cooldowns(delta)
+			_check_contact_damage()
+			# Magnet pulls new drops
+			if magnet_active:
+				_activate_all_magnets()
 		_update_buffs(delta)
-		_handle_card_input()
-		_update_card_cooldowns(delta)
-		_check_contact_damage()
-		# Magnet pulls new drops
-		if magnet_active:
-			_activate_all_magnets()
+		_update_temp_slow_effects()
 	
 	_update_hud()
 
@@ -367,8 +556,11 @@ func _process(delta):
 
 func _start_wave(wave_num: int):
 	current_wave = wave_num
-	wave_timer = wave_duration + min(wave_num * 5, 30)  # Longer waves as you progress
-	spawn_interval = max(0.3, 1.5 - wave_num * 0.1)
+	if is_hard_mode:
+		wave_timer = 120.0  # Hard mode: 2-minute wave duration
+	else:
+		wave_timer = wave_duration + min(wave_num * 5, 30)  # Longer waves as you progress
+	spawn_interval = max(0.3, (1.25 if is_hard_mode else 1.5) - wave_num * (0.12 if is_hard_mode else 0.1))
 	spawn_timer = 0
 	is_wave_active = true
 	is_shopping = false
@@ -377,8 +569,14 @@ func _start_wave(wave_num: int):
 	GameState.roll_all_dice()
 	current_dice_bonus = _calc_dice_bonus()
 	
+	# Apply permanent armor points at start of each wave
+	if bonus_armor_points > 0:
+		GameState.add_armor(bonus_armor_points)
+	
 	SFX.play("wave_start")
-	add_log("[color=yellow]Wave %d![/color]" % wave_num)
+	if wave_num == 1 and is_hard_mode:
+		add_log("[color=red]⚠ 困难模式：怪物更强、掉落更少、数量更多[/color]")
+	add_log("[color=yellow]第 %d 波开始！[/color]" % wave_num)
 
 func _update_wave(delta):
 	wave_timer -= delta
@@ -386,6 +584,8 @@ func _update_wave(delta):
 	
 	if spawn_timer <= 0:
 		_spawn_enemy()
+		if is_hard_mode and randf() < 0.6:
+			_spawn_enemy()
 		spawn_timer = spawn_interval
 	
 	if wave_timer <= 0:
@@ -422,15 +622,21 @@ func _spawn_enemy():
 	enemy_scene.add_to_group("enemies")
 	
 	var level_scale = 1.0 + current_wave * 0.15
+	if is_hard_mode:
+		level_scale *= 1.75
 	enemy_scene.setup(def, player, level_scale)
+	if is_hard_mode:
+		enemy_scene.move_speed *= 1.22
 	enemy_scene.arena_min = ARENA_MIN
 	enemy_scene.arena_max = ARENA_MAX
 	enemy_scene.died.connect(_on_enemy_died)
 	enemies_alive += 1
 	
 	# Boss wave every 5 waves: also spawn boss
-	if current_wave % 5 == 0 and wave_timer > wave_duration * 0.8:
-		if randi() % 10 == 0:
+	var active_wave_duration = 120.0 if is_hard_mode else wave_duration
+	if current_wave % 5 == 0 and wave_timer > active_wave_duration * 0.8:
+		var boss_spawn_roll = 10 if not is_hard_mode else 6
+		if randi() % boss_spawn_roll == 0:
 			var boss_def = GameData.ENEMIES.get("demon")
 			if boss_def:
 				var boss = CharacterBody2D.new()
@@ -438,7 +644,10 @@ func _spawn_enemy():
 				boss.position = spawn_pos + Vector2(30, 0)
 				enemy_container.add_child(boss)
 				boss.add_to_group("enemies")
-				boss.setup(boss_def, player, level_scale * 0.7)
+				var boss_scale = level_scale * (1.0 if is_hard_mode else 0.7)
+				boss.setup(boss_def, player, boss_scale)
+				if is_hard_mode:
+					boss.move_speed *= 1.18
 				boss.arena_min = ARENA_MIN
 				boss.arena_max = ARENA_MAX
 				boss.died.connect(_on_enemy_died)
@@ -458,39 +667,67 @@ func _on_enemy_died(_enemy, _pos: Vector2):
 	SFX.play_varied("enemy_die")
 	# Spawn drops
 	_spawn_drops(_pos)
-	# Mimic: bonus gold + guaranteed health potion
+	# Mimic: bonus gold + guaranteed health potion (hard mode gets reduced rewards)
 	if _enemy is CharacterBody2D and _enemy.enemy_def \
 			and _enemy.enemy_def.type == GameData.EnemyType.MIMIC:
-		_create_drop(0, randi_range(8, 15), _pos)  # Extra gold
-		_create_drop(1, 15, _pos)  # Health potion
+		if is_hard_mode:
+			_create_drop(0, randi_range(2, 6), _pos)  # Further reduced extra gold
+			if randf() < 0.25:
+				_create_drop(1, 8, _pos)
+		else:
+			_create_drop(0, randi_range(8, 15), _pos)  # Extra gold
+			_create_drop(1, 15, _pos)  # Health potion
 	if GameState.relics.has("blood_vial"):
 		GameState.heal(1)
 
 # === DROP SYSTEM ===
 
 func _spawn_drops(pos: Vector2):
-	# Always drop some gold
-	_create_drop(0, randi_range(1, 3), pos)  # DropType.GOLD = 0
+	# Always drop some gold (hard mode reduced)
+	if is_hard_mode:
+		_create_drop(0, 1, pos)  # DropType.GOLD = 0
+	else:
+		_create_drop(0, randi_range(1, 3), pos)
 	
-	# Random additional drops
+	# Random additional drops (hard mode: lower rates)
 	var roll = randf()
-	if roll < 0.12:
-		_create_drop(1, 10 + current_wave * 2, pos)  # Health potion
-	elif roll < 0.18:
-		_create_drop(4, 1, pos)  # Energy orb
-	elif roll < 0.23:
-		_create_drop(2, 5, pos)  # Speed boost (5s)
-	elif roll < 0.28:
-		_create_drop(3, 5, pos)  # Damage boost (5s)
-	elif roll < 0.31:
-		_create_drop(5, 8, pos)  # Magnet (8s)
-	elif roll < 0.33:
-		_create_drop(6, 0, pos)  # Bomb
+	if is_hard_mode:
+		if roll < 0.04:
+			_create_drop(1, 6 + current_wave, pos)  # Health potion
+		elif roll < 0.055:
+			_create_drop(4, 1, pos)  # Energy orb
+		elif roll < 0.07:
+			_create_drop(2, 4, pos)  # Speed boost
+		elif roll < 0.085:
+			_create_drop(3, 4, pos)  # Damage boost
+		elif roll < 0.095:
+			_create_drop(5, 5, pos)  # Magnet
+		elif roll < 0.10:
+			_create_drop(6, 0, pos)  # Bomb
+	else:
+		if roll < 0.12:
+			_create_drop(1, 10 + current_wave * 2, pos)  # Health potion
+		elif roll < 0.18:
+			_create_drop(4, 1, pos)  # Energy orb
+		elif roll < 0.23:
+			_create_drop(2, 5, pos)  # Speed boost (5s)
+		elif roll < 0.28:
+			_create_drop(3, 5, pos)  # Damage boost (5s)
+		elif roll < 0.31:
+			_create_drop(5, 8, pos)  # Magnet (8s)
+		elif roll < 0.33:
+			_create_drop(6, 0, pos)  # Bomb
 	
-	# Boss drops guaranteed extra
+	# Boss drops guaranteed extra (hard mode reduced)
 	if current_wave % 5 == 0:
-		_create_drop(1, 20, pos)
-		_create_drop(3, 8, pos)
+		if is_hard_mode:
+			if randf() < 0.5:
+				_create_drop(1, 10, pos)
+			if randf() < 0.3:
+				_create_drop(3, 5, pos)
+		else:
+			_create_drop(1, 20, pos)
+			_create_drop(3, 8, pos)
 
 func _create_drop(type: int, val: int, pos: Vector2):
 	# Clamp spawn position to arena interior
@@ -514,30 +751,30 @@ func _on_drop_collected(drop_type: int, value: int):
 		1:  # HEALTH_POTION
 			GameState.heal(value)
 			SFX.play("heal")
-			add_log("[color=green]+%d HP[/color]" % value)
+			add_log("[color=green]+%d 生命[/color]" % value)
 			VFX.flash_screen(Color(0.1, 0.9, 0.2, 0.15), 0.15)
 		2:  # SPEED_BOOST
 			speed_boost_timer = float(value)
 			player.move_speed = 180.0
 			SFX.play("powerup")
-			add_log("[color=cyan]⚡ Speed Boost![/color]")
+			add_log("[color=cyan]⚡ 速度提升！[/color]")
 		3:  # DAMAGE_BOOST
 			damage_boost_timer = float(value)
 			SFX.play("powerup")
-			add_log("[color=orange]🔥 Damage Boost![/color]")
+			add_log("[color=orange]🔥 伤害提升！[/color]")
 		4:  # ENERGY_ORB
 			GameState.player_energy = min(GameState.player_max_energy, GameState.player_energy + value)
 			SFX.play("powerup")
-			add_log("[color=blue]+%d Energy[/color]" % value)
+			add_log("[color=blue]+%d 能量[/color]" % value)
 		5:  # MAGNET
 			magnet_active = true
 			magnet_timer = float(value)
 			_activate_all_magnets()
 			SFX.play("powerup")
-			add_log("[color=white]🧲 Magnet![/color]")
+			add_log("[color=white]🧲 磁铁生效！[/color]")
 		6:  # BOMB
 			_detonate_bomb(player.global_position)
-			add_log("[color=red]💥 BOMB![/color]")
+			add_log("[color=red]💥 炸弹爆发！[/color]")
 
 func _activate_all_magnets():
 	for drop in drop_container.get_children():
@@ -583,7 +820,7 @@ func _spawn_explosion_ring(center: Vector2, radius: float, color: Color):
 	ct.timeout.connect(ring.queue_free)
 
 func _on_wave_end():
-	add_log("[color=green]Wave %d complete![/color]" % current_wave)
+	add_log("[color=green]第 %d 波完成！[/color]" % current_wave)
 	wave_complete.emit(current_wave)
 	
 	# Heal between waves
@@ -644,7 +881,7 @@ func _update_dice(delta):
 		GameState.roll_all_dice()
 		current_dice_bonus = _calc_dice_bonus()
 		SFX.play("dice_roll")
-		add_log("[color=cyan]🎲 Dice rolled! Bonus: +%d[/color]" % current_dice_bonus)
+		add_log("[color=cyan]🎲 掷骰完成！加成：+%d[/color]" % current_dice_bonus)
 
 func _calc_dice_bonus() -> int:
 	var total = 0
@@ -656,6 +893,7 @@ func _calc_dice_bonus() -> int:
 
 var auto_attack_timer: float = 0.0
 var auto_attack_interval: float = 0.8
+var auto_attack_targets: int = 1  # Lv1=1 target, max Lv5=5 targets
 
 func _update_auto_attack(delta):
 	auto_attack_timer -= delta
@@ -663,16 +901,17 @@ func _update_auto_attack(delta):
 		return
 	auto_attack_timer = auto_attack_interval
 	
-	# Find nearest enemy
-	var nearest = _find_nearest_enemy()
-	if not nearest:
+	# Find nearest enemies up to auto_attack_targets count
+	var targets = _find_nearest_enemies(auto_attack_targets)
+	if targets.is_empty():
 		return
 	
-	# Fire basic projectile toward nearest enemy
-	var dir = (nearest.global_position - player.global_position).normalized()
-	var base_dmg = 3 + current_dice_bonus / 4
-	var proj = _create_projectile(player.global_position, dir, int(base_dmg * _get_damage_multiplier()), 180.0)
-	proj.setup_visual(MAGE_COLOR_SECONDARY, 3.2)
+	var base_dmg = 3 + bonus_attack_points + current_dice_bonus / 4
+	var dmg = int(base_dmg * _get_damage_multiplier())
+	for target in targets:
+		var dir = (target.global_position - player.global_position).normalized()
+		var proj = _create_projectile(player.global_position, dir, dmg, 180.0)
+		proj.setup_visual(MAGE_COLOR_SECONDARY, 3.2)
 
 func _find_nearest_enemy() -> Node2D:
 	var best: Node2D = null
@@ -685,6 +924,20 @@ func _find_nearest_enemy() -> Node2D:
 			best_dist = dist
 			best = e
 	return best
+
+func _find_nearest_enemies(count: int) -> Array:
+	var candidates: Array = []
+	for e in enemy_container.get_children():
+		if not e.has_method("take_damage"):
+			continue
+		var dist = e.global_position.distance_to(player.global_position)
+		if dist < 300.0:
+			candidates.append({"enemy": e, "dist": dist})
+	candidates.sort_custom(func(a, b): return a["dist"] < b["dist"])
+	var result: Array = []
+	for i in range(min(count, candidates.size())):
+		result.append(candidates[i]["enemy"])
+	return result
 
 func _find_enemies_in_range(center: Vector2, radius: float) -> Array:
 	var result = []
@@ -710,6 +963,64 @@ func _update_buffs(delta):
 
 func _get_damage_multiplier() -> float:
 	return damage_boost_mult if damage_boost_timer > 0 else 1.0
+
+func _shop_heal_cost() -> int:
+	if shop_heal_buy_count == 0:
+		return 1
+	if shop_heal_buy_count == 1:
+		return 5
+	if shop_heal_buy_count == 2:
+		return 10
+	return 10 + (shop_heal_buy_count - 2) * 5
+
+func _shop_upgrade_attack_cost() -> int:
+	return 20 + shop_upgrade_buy_count * 20
+
+func _shop_attack_point_cost() -> int:
+	return 10 + shop_attack_point_buy_count * 10
+
+func _shop_armor_point_cost() -> int:
+	return 10 + shop_armor_point_buy_count * 10
+
+func _apply_temporary_slow(enemy: Node2D, factor: float, duration: float):
+	if not is_instance_valid(enemy):
+		return
+	var key = int(enemy.get_instance_id())
+	var now = Time.get_ticks_msec() / 1000.0
+	var until = now + duration
+	var restore_factor = enemy.slow_factor
+	if _temp_slow_effects.has(key):
+		var old = _temp_slow_effects[key]
+		var old_until = float(old.get("until", 0.0))
+		until = max(until, old_until)
+		restore_factor = float(old.get("restore", restore_factor))
+	_temp_slow_effects[key] = {
+		"enemy": enemy,
+		"until": until,
+		"factor": factor,
+		"restore": restore_factor,
+	}
+	enemy.slow_factor = min(enemy.slow_factor, factor)
+
+func _update_temp_slow_effects():
+	if _temp_slow_effects.is_empty():
+		return
+	var now = Time.get_ticks_msec() / 1000.0
+	var to_remove: Array = []
+	for key in _temp_slow_effects.keys():
+		var entry = _temp_slow_effects[key]
+		var enemy = entry.get("enemy") as Node2D
+		if not is_instance_valid(enemy):
+			to_remove.append(key)
+			continue
+		var factor = float(entry.get("factor", 1.0))
+		enemy.slow_factor = min(enemy.slow_factor, factor)
+		if now >= float(entry.get("until", 0.0)):
+			if is_equal_approx(enemy.slow_factor, factor):
+				enemy.slow_factor = float(entry.get("restore", 1.0))
+			to_remove.append(key)
+	for key in to_remove:
+		_temp_slow_effects.erase(key)
 
 # === PASSIVE ATTACKS (unlockable) ===
 
@@ -876,7 +1187,7 @@ func _fire_chain_lightning(lvl: int):
 	
 	VFX.flash_screen(Color(0.4, 0.6, 1.0, 0.15), 0.08)
 	SFX.play("lightning")
-	add_log("[color=cyan]⚡ Chain Lightning x%d[/color]" % hit.size())
+	add_log("[color=cyan]⚡ 连锁闪电命中 %d[/color]" % hit.size())
 
 func _spawn_lightning_line(from: Vector2, to: Vector2):
 	var line = Line2D.new()
@@ -900,97 +1211,63 @@ func _spawn_lightning_line(from: Vector2, to: Vector2):
 	tween.tween_property(line, "modulate:a", 0.0, 0.25)
 	tween.tween_callback(line.queue_free)
 
-## Flame tornado that circles outward from player
+## Flame tornado - nova-shaped pulse that applies sustained burn damage
 func _spawn_flame_tornado(lvl: int):
-	var dmg = int((8 + lvl * 4) * _get_damage_multiplier())
-	var radius = 60.0 + lvl * 15
-	var tornado = Node2D.new()
-	tornado.position = player.global_position
-	tornado.z_index = 12
-	add_child(tornado)
+	var radius = 80.0 + lvl * 14.0
+	var burn_add = 3 + lvl * 2
+	var hit_count = 0
+	for e in enemy_container.get_children():
+		if not e.has_method("take_damage"):
+			continue
+		if e.global_position.distance_to(player.global_position) <= radius:
+			e.burn_stacks += burn_add
+			hit_count += 1
 	
-	# Fire particles in expanding spiral
-	var duration = 1.5
-	var hit_enemies: Array = []
-	
-	# Animate via process
-	var elapsed = 0.0
-	var _step_func: Callable
-	_step_func = func(delta_inner: float):
-		elapsed += delta_inner
-		if elapsed >= duration or not is_instance_valid(tornado):
-			if is_instance_valid(tornado):
-				tornado.queue_free()
-			return
-		
-		var progress = elapsed / duration
-		var angle = progress * TAU * 3  # 3 full rotations
-		var r = progress * radius
-		var fire_pos = tornado.position + Vector2(cos(angle), sin(angle)) * r
-		
-		# Spawn fire particle
-		var p = ColorRect.new()
-		p.size = Vector2(5, 5)
-		p.position = fire_pos - Vector2(2.5, 2.5)
-		p.color = Color(1, randf_range(0.2, 0.6), 0.0, 0.9)
-		p.z_index = 12
-		add_child(p)
-		var tw = p.create_tween()
-		tw.tween_property(p, "modulate:a", 0.0, 0.4)
-		tw.tween_callback(p.queue_free)
-		
-		# Damage enemies near fire
-		for e in enemy_container.get_children():
-			if e.has_method("take_damage") and not hit_enemies.has(e):
-				if e.global_position.distance_to(fire_pos) < 15:
-					e.take_damage(dmg, (e.global_position - fire_pos).normalized())
-					e.burn_stacks += 2
-					hit_enemies.append(e)
-	
-	# Use a timer loop to drive the animation
-	var timer_node = Timer.new()
-	timer_node.wait_time = 0.05
-	timer_node.autostart = true
-	tornado.add_child(timer_node)
-	timer_node.timeout.connect(func(): _step_func.call(0.05))
-	get_tree().create_timer(duration).timeout.connect(func():
-		if is_instance_valid(tornado):
-			tornado.queue_free()
-	)
-	
-	VFX.flash_screen(Color(1, 0.3, 0.0, 0.12), 0.1)
+	_spawn_explosion_ring(player.global_position, radius, Color(1.0, 0.48, 0.12))
+	VFX.flash_screen(Color(1.0, 0.35, 0.1, 0.16), 0.1)
 	SFX.play("fire")
-	add_log("[color=orange]🌪️ Flame Tornado![/color]")
+	add_log("[color=orange]🔥 火焰旋风：持续灼烧 %d[/color]" % hit_count)
 
-## Ice nova - freezes and damages nearby enemies
+## Ice nova - control-only: Lv1 slow, Lv2 freeze 1s, Lv3+ freeze 3s (no damage)
 func _fire_ice_nova(lvl: int):
-	var radius = 80.0 + lvl * 15
-	var dmg = int((6 + lvl * 3) * _get_damage_multiplier())
-	var freeze_time = 1.0 + lvl * 0.5
+	var radius = 80.0 + lvl * 15.0
 	var enemies = _find_enemies_in_range(player.global_position, radius)
-	
 	if enemies.is_empty():
 		return
 	
-	for e in enemies:
-		e.take_damage(dmg, (e.global_position - player.global_position).normalized())
-		e.freeze_timer = max(e.freeze_timer, freeze_time)
+	if lvl <= 1:
+		for e in enemies:
+			_apply_temporary_slow(e, 0.45, 1.6)
+		add_log("[color=aqua]❄️ 冰霜新星 Lv1：减速 %d[/color]" % enemies.size())
+	elif lvl == 2:
+		for e in enemies:
+			e.freeze_timer = max(e.freeze_timer, 1.0)
+		add_log("[color=aqua]❄️ 冰霜新星 Lv2：定身 1s（%d）[/color]" % enemies.size())
+	else:
+		for e in enemies:
+			e.freeze_timer = max(e.freeze_timer, 3.0)
+		add_log("[color=aqua]❄️ 冰霜新星 Lv3：定身 3s（%d）[/color]" % enemies.size())
 	
-	# Visual: expanding ring
 	_spawn_explosion_ring(player.global_position, radius, Color(0.3, 0.6, 1.0))
 	VFX.flash_screen(Color(0.3, 0.5, 1.0, 0.2), 0.12)
 	SFX.play("freeze")
-	add_log("[color=aqua]❄️ Ice Nova! Froze %d[/color]" % enemies.size())
 
-## Poison cloud - damages and poisons enemies near player
+## Poison cloud - nova-shaped pulse that applies sustained poison damage
 func _apply_poison_cloud(lvl: int):
-	var radius = 40.0 + lvl * 10
-	var dmg = int((1 + lvl) * _get_damage_multiplier())
+	var radius = 80.0 + lvl * 14.0
+	var poison_add = 3 + lvl * 2
+	var hit_count = 0
 	for e in enemy_container.get_children():
-		if e.has_method("take_damage"):
-			if e.global_position.distance_to(player.global_position) < radius:
-				e.take_damage(dmg, Vector2.ZERO)
-				e.poison_stacks = max(e.poison_stacks, lvl)
+		if not e.has_method("take_damage"):
+			continue
+		if e.global_position.distance_to(player.global_position) <= radius:
+			e.poison_stacks += poison_add
+			hit_count += 1
+	
+	_spawn_explosion_ring(player.global_position, radius, Color(0.35, 0.95, 0.55))
+	VFX.flash_screen(Color(0.25, 0.85, 0.45, 0.12), 0.08)
+	SFX.play("powerup")
+	add_log("[color=green]☣ 毒雾：持续中毒 %d[/color]" % hit_count)
 
 ## Holy cross - fires projectiles in 4 (+ diagonals at higher levels) directions
 func _fire_holy_cross(lvl: int):
@@ -1029,7 +1306,7 @@ func _drop_meteors(lvl: int):
 		var delay = i * 0.2
 		_spawn_meteor(impact_pos, dmg, radius, delay)
 	
-	add_log("[color=red]☄️ Meteor x%d![/color]" % count)
+	add_log("[color=red]☄️ 陨石降临 %d 发！[/color]" % count)
 	SFX.play("explosion", 0.7)
 
 func _spawn_meteor(pos: Vector2, dmg: int, radius: float, delay: float):
@@ -1058,10 +1335,15 @@ func _spawn_meteor(pos: Vector2, dmg: int, radius: float, delay: float):
 		warning.queue_free()
 	)
 
-## Spirit swords - homing projectiles that chase the nearest enemy
+## Spirit swords - homing projectiles with level-based ricochet
 func _fire_spirit_swords(lvl: int):
 	var count = 1 + (lvl / 2)  # 1 at lv1-2, 2 at lv3-4, 3 at lv5+
 	var dmg = int((6 + lvl * 2) * _get_damage_multiplier())
+	var bounce_max = 0
+	if lvl == 2:
+		bounce_max = 1
+	elif lvl >= 3:
+		bounce_max = 3
 	
 	for i in range(count):
 		var angle = randf() * TAU
@@ -1091,16 +1373,36 @@ func _fire_spirit_swords(lvl: int):
 		sword.monitorable = false
 		
 		# Homing logic via metadata
-		var meta = {"dmg": dmg, "speed": 130.0 + lvl * 20, "lifetime": 3.0, "hit": []}
+		var meta = {
+			"dmg": dmg,
+			"speed": 130.0 + lvl * 20,
+			"lifetime": 3.2,
+			"hit": [],
+			"bounce_left": bounce_max,
+			"hit_cd": 0.0,
+		}
 		sword.set_meta("sword_data", meta)
 		
 		sword.body_entered.connect(func(body):
-			if body.has_method("take_damage") and not meta.hit.has(body):
-				meta.hit.append(body)
-				var kb = (body.global_position - sword.global_position).normalized()
-				body.take_damage(meta.dmg, kb)
-				# Visual hit
-				_spawn_damage_hit_flash(sword.global_position, Color(0.5, 0.8, 1.0))
+			if not body.has_method("take_damage"):
+				return
+			if meta.hit_cd > 0.0:
+				return
+			if meta.hit.has(body):
+				return
+			meta.hit.append(body)
+			var kb = (body.global_position - sword.global_position).normalized()
+			if kb == Vector2.ZERO:
+				kb = Vector2.RIGHT.rotated(randf() * TAU)
+			body.take_damage(meta.dmg, kb)
+			_spawn_damage_hit_flash(sword.global_position, Color(0.5, 0.8, 1.0))
+			
+			# Ricochet logic
+			if meta.bounce_left > 0:
+				meta.bounce_left -= 1
+				meta.hit_cd = 0.08
+				sword.position = body.global_position + kb * 10.0
+			else:
 				sword.queue_free()
 		)
 		
@@ -1113,9 +1415,12 @@ func _fire_spirit_swords(lvl: int):
 			if meta.lifetime <= 0:
 				sword.queue_free()
 				return
-			# Find nearest enemy
+			if meta.hit_cd > 0.0:
+				meta.hit_cd = max(0.0, float(meta.hit_cd) - delta_inner)
+			
+			# Find nearest unhitted enemy
 			var best: Node2D = null
-			var best_dist = 250.0
+			var best_dist = 260.0
 			for e in enemy_container.get_children():
 				if e.has_method("take_damage") and not meta.hit.has(e):
 					var d = e.global_position.distance_to(sword.global_position)
@@ -1125,11 +1430,13 @@ func _fire_spirit_swords(lvl: int):
 			if best:
 				var dir = (best.global_position - sword.global_position).normalized()
 				sword.position += dir * meta.speed * delta_inner
-				# Rotate sprite to face direction
 				sprite.rotation = dir.angle()
 			else:
-				# Drift forward
-				sword.position += Vector2.RIGHT.rotated(sprite.rotation) * meta.speed * delta_inner * 0.5
+				# If no next target after at least one hit, end early
+				if meta.hit.size() > 0:
+					sword.queue_free()
+					return
+				sword.position += Vector2.RIGHT.rotated(sprite.rotation) * meta.speed * delta_inner * 0.45
 		
 		var timer = Timer.new()
 		timer.wait_time = 0.016
@@ -1149,70 +1456,92 @@ func _spawn_damage_hit_flash(pos: Vector2, color: Color):
 		tw.tween_property(p, "modulate:a", 0.0, 0.25)
 		tw.tween_callback(p.queue_free)
 
-## Earthquake - expanding shockwave from player that damages + knocks back
+func _quake_knockup(enemy: Node2D, _unused: float, delay_before_stun: float, stun_time: float = 0.0):
+	if not is_instance_valid(enemy):
+		return
+	# No launch anymore: enemy is knocked back by take_damage(), then stunned after a short delay.
+	if stun_time <= 0.0:
+		return
+	get_tree().create_timer(delay_before_stun).timeout.connect(func():
+		if not is_instance_valid(enemy):
+			return
+		if enemy.has_method("get") and enemy.has_method("set"):
+			var cur_after = float(enemy.get("freeze_timer"))
+			enemy.set("freeze_timer", max(cur_after, stun_time))
+	)
+
+## Earthquake - lower damage, knockback, level-based range; Lv3 adds delayed stun
 func _trigger_earthquake(lvl: int):
-	var max_radius = 100.0 + lvl * 25
-	var dmg = int((8 + lvl * 4) * _get_damage_multiplier())
-	var kb_force = 200.0 + lvl * 30
+	var max_radius: float
+	var base_damage: int
+	var kb_base: float
+	var knockup_lift: float
+	var stun_sec: float = 0.0
+	match lvl:
+		1:
+			max_radius = 92.0
+			base_damage = 5
+			kb_base = 220.0
+			knockup_lift = 10.0
+		2:
+			max_radius = 124.0
+			base_damage = 7
+			kb_base = 270.0
+			knockup_lift = 13.0
+		_:
+			max_radius = 156.0 + float(max(0, lvl - 3)) * 8.0
+			base_damage = 9 + max(0, lvl - 3)
+			kb_base = 320.0 + float(max(0, lvl - 3)) * 22.0
+			knockup_lift = 16.0 + float(max(0, lvl - 3)) * 2.0
+			stun_sec = 1.0
 	
-	VFX.screen_shake(6.0 + lvl, 4.0)
-	VFX.flash_screen(Color(0.6, 0.4, 0.1, 0.2), 0.15)
+	var dmg_center = int(base_damage * _get_damage_multiplier())
+	var dmg_edge = max(1, int(round(float(dmg_center) * 0.55)))
+	
+	VFX.screen_shake(6.0 + lvl * 0.45, 4.5)
+	VFX.flash_screen(Color(0.65, 0.46, 0.18, 0.22), 0.10)
 	SFX.play("explosion")
 	
-	# Expanding ring visual + damage
+	# Ring visual
 	var ring = Node2D.new()
 	ring.position = player.global_position
-	ring.z_index = 8
+	ring.z_index = 9
 	add_child(ring)
-	
-	var current_radius = 0.0
-	var duration = 0.5
-	var elapsed = 0.0
-	var hit_enemies: Array = []
-	
-	var step_timer = Timer.new()
-	step_timer.wait_time = 0.033
-	step_timer.autostart = true
-	ring.add_child(step_timer)
-	
-	step_timer.timeout.connect(func():
-		elapsed += 0.033
-		if elapsed >= duration or not is_instance_valid(ring):
-			if is_instance_valid(ring):
-				ring.queue_free()
-			return
-		
-		current_radius = (elapsed / duration) * max_radius
-		
-		# Draw ring particles
-		for k in range(4):
-			var angle = randf() * TAU
-			var p = ColorRect.new()
-			p.size = Vector2(4, 4)
-			p.position = Vector2(cos(angle), sin(angle)) * current_radius - Vector2(2, 2)
-			p.color = Color(0.7, 0.5, 0.2, 0.8)
-			p.z_index = 8
-			ring.add_child(p)
-			var tw = p.create_tween()
-			tw.tween_property(p, "modulate:a", 0.0, 0.2)
-			tw.tween_callback(p.queue_free)
-		
-		# Damage enemies in the ring zone
-		for e in enemy_container.get_children():
-			if e.has_method("take_damage") and not hit_enemies.has(e):
-				var dist = e.global_position.distance_to(ring.position)
-				if dist >= current_radius - 15 and dist <= current_radius + 15:
-					var kb = (e.global_position - ring.position).normalized()
-					e.take_damage(dmg, kb * kb_force / 150.0)
-					hit_enemies.append(e)
-	)
-	
-	get_tree().create_timer(duration + 0.1).timeout.connect(func():
+	for i in range(34):
+		var angle = TAU * float(i) / 34.0
+		var p = ColorRect.new()
+		p.size = Vector2(4, 4)
+		p.position = Vector2(cos(angle), sin(angle)) * max_radius - Vector2(2, 2)
+		p.color = Color(0.82, 0.62, 0.28, 0.9)
+		p.z_index = 9
+		ring.add_child(p)
+		var tw = p.create_tween()
+		tw.tween_property(p, "modulate:a", 0.0, 0.20)
+		tw.tween_callback(p.queue_free)
+	get_tree().create_timer(0.24).timeout.connect(func():
 		if is_instance_valid(ring):
 			ring.queue_free()
 	)
 	
-	add_log("[color=yellow]🌍 Earthquake! %d radius[/color]" % int(max_radius))
+	for e in enemy_container.get_children():
+		if not e.has_method("take_damage"):
+			continue
+		var dist = e.global_position.distance_to(player.global_position)
+		if dist > max_radius:
+			continue
+		var dir = (e.global_position - player.global_position).normalized()
+		if dir == Vector2.ZERO:
+			dir = Vector2.RIGHT
+		var t = clampf(dist / max(1.0, max_radius), 0.0, 1.0)
+		var dmg = int(round(lerpf(float(dmg_center), float(dmg_edge), t)))
+		var kb_force = lerpf(kb_base, kb_base * 0.65, t)
+		e.take_damage(dmg, dir * (kb_force / 150.0))
+		_quake_knockup(e, knockup_lift, 0.22 + float(lvl) * 0.05, stun_sec)
+	
+	if lvl >= 3:
+		add_log("[color=yellow]🌍 地震Lv3：先击退，再眩晕[/color]")
+	else:
+		add_log("[color=yellow]🌍 地震：强力击退[/color]")
 
 ## Vampiric aura - drains HP from nearby enemies, heals player
 func _apply_vampiric_aura(lvl: int):
@@ -1377,7 +1706,7 @@ func _use_card(slot: int):
 		return
 	
 	# Set cooldown
-	if card_id == "block":
+	if card_id == "block" or card_id == "strike" or card_id == "heal":
 		card_cooldowns[card_id] = 30.0
 	elif card_id == "lucky_roll":
 		card_cooldowns[card_id] = 40.0
@@ -1502,27 +1831,27 @@ func _execute_card(card_id: String, card_def, value: int):
 						0:
 							var slash_damage = GameState.apply_damage_with_relics(max(4, value))
 							_player_circle_slash(slash_damage, 92.0, Color(1.0, 0.82, 0.55, 0.95))
-							add_log("[color=yellow]🎲 幸运骰：斩击[/color]" if Loc.current_lang == "zh" else "[color=yellow]🎲 Lucky Roll: Slash[/color]")
+							add_log("[color=yellow]🎲 幸运骰：斩击[/color]")
 						1:
 							_player_blink(120.0)
-							add_log("[color=violet]🎲 幸运骰：闪现[/color]" if Loc.current_lang == "zh" else "[color=violet]🎲 Lucky Roll: Blink[/color]")
+							add_log("[color=violet]🎲 幸运骰：闪现[/color]")
 						_:
 							var heal_amount = max(4, value)
 							GameState.heal(heal_amount)
 							if is_instance_valid(player):
 								player.update_hp_bar(GameState.player_hp, GameState.player_max_hp)
 							VFX.flash_screen(Color(0.2, 1.0, 0.35, 0.18), 0.1)
-							add_log("[color=green]🎲 幸运骰：治疗 +%d[/color]" % heal_amount if Loc.current_lang == "zh" else "[color=green]🎲 Lucky Roll: Heal +%d[/color]" % heal_amount)
+							add_log("[color=green]🎲 幸运骰：治疗 +%d[/color]" % heal_amount)
 				"loaded_dice":
 					if GameState.active_dice.size() > 0:
 						var pick = randi() % GameState.active_dice.size()
 						GameState.active_dice[pick].value = 6
 						current_dice_bonus = _calc_dice_bonus()
-						add_log("[color=cyan]🎲 灌铅骰：一颗骰子固定为6[/color]" if Loc.current_lang == "zh" else "[color=cyan]🎲 Loaded Dice: one die set to 6[/color]")
+						add_log("[color=cyan]🎲 灌铅骰：一颗骰子固定为6[/color]")
 				_:
 					GameState.roll_all_dice()
 					current_dice_bonus = _calc_dice_bonus()
-					add_log("[color=cyan]🎲 Rerolled! +%d[/color]" % current_dice_bonus)
+					add_log("[color=cyan]🎲 重新掷骰！加成 +%d[/color]" % current_dice_bonus)
 
 func _update_card_cooldowns(delta):
 	for card_id in card_cooldowns:
@@ -1557,7 +1886,7 @@ func _check_contact_damage():
 
 func _on_player_died():
 	is_wave_active = false
-	add_log("[color=red]You fell...[/color]")
+	add_log("[color=red]你倒下了……[/color]")
 	await get_tree().create_timer(2.0).timeout
 	get_tree().change_scene_to_file("res://scenes/main/game_over.tscn")
 
@@ -1565,6 +1894,12 @@ func _on_player_died():
 
 func _open_shop():
 	is_shopping = true
+	
+	# Per-shop purchase limits (reset each wave shop)
+	shop_heal_bought_this_shop = false
+	shop_upgrade_bought_this_shop = false
+	shop_attack_point_bought_this_shop = false
+	shop_armor_point_bought_this_shop = false
 	
 	# Full-screen dark overlay
 	var overlay = ColorRect.new()
@@ -1577,14 +1912,17 @@ func _open_shop():
 	# Main responsive panel
 	var shop_panel = PanelContainer.new()
 	shop_panel.name = "ShopPanel"
-	shop_panel.set_anchors_preset(Control.PRESET_CENTER)
+	shop_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	var vp = get_viewport_rect().size
+	var edge_gap := 28.0
 	var panel_size = Vector2(
-		clampf(vp.x * 0.94, 560.0, 980.0),
-		clampf(vp.y * 0.92, 520.0, 700.0)
+		min(980.0, vp.x - edge_gap * 2.0),
+		min(680.0, vp.y - edge_gap * 2.0)
 	)
 	shop_panel.custom_minimum_size = panel_size
-	shop_panel.position = -panel_size * 0.5
+	shop_panel.size = panel_size
+	var panel_y_offset := -20.0
+	shop_panel.position = (vp - panel_size) * 0.5 + Vector2(0, panel_y_offset)
 	overlay.add_child(shop_panel)
 	
 	var margin = MarginContainer.new()
@@ -1654,32 +1992,106 @@ func _open_shop():
 	product_root.add_theme_constant_override("separation", 8)
 	product_margin.add_child(product_root)
 	
-	var products_title = Label.new()
-	products_title.text = ("商品列表" if Loc.current_lang == "zh" else "Products")
-	products_title.add_theme_font_size_override("font_size", 16)
-	products_title.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
-	product_root.add_child(products_title)
-	
+
 	var product_row = HBoxContainer.new()
 	product_row.add_theme_constant_override("separation", 10)
 	product_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	product_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	product_root.add_child(product_row)
 	
-	# Horizontal layout: 3 columns, each column holds up to 3 cards.
-	var col_width = clampf((panel_size.x - 120.0) / 3.0, 210.0, 320.0)
+	var make_island_style = func(bg: Color, border: Color) -> StyleBoxFlat:
+		var sb_island = StyleBoxFlat.new()
+		sb_island.bg_color = bg
+		sb_island.border_color = border
+		sb_island.set_border_width_all(2)
+		sb_island.corner_radius_top_left = 14
+		sb_island.corner_radius_top_right = 14
+		sb_island.corner_radius_bottom_left = 14
+		sb_island.corner_radius_bottom_right = 14
+		return sb_island
+	
+	# Two-column layout: left = player stats, right = shop items
+	var left_col = PanelContainer.new()
+	left_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left_col.size_flags_stretch_ratio = 1.0
+	left_col.custom_minimum_size = Vector2(220, 0)
+	left_col.add_theme_stylebox_override("panel", make_island_style.call(Color(0.10, 0.12, 0.16, 0.95), Color(0.30, 0.40, 0.55)))
+	product_row.add_child(left_col)
+	
+	var left_margin = MarginContainer.new()
+	left_margin.add_theme_constant_override("margin_left", 10)
+	left_margin.add_theme_constant_override("margin_right", 10)
+	left_margin.add_theme_constant_override("margin_top", 10)
+	left_margin.add_theme_constant_override("margin_bottom", 10)
+	left_col.add_child(left_margin)
+	
+	var stat_root = VBoxContainer.new()
+	stat_root.add_theme_constant_override("separation", 8)
+	left_margin.add_child(stat_root)
+	
+	var stat_title = Label.new()
+	stat_title.text = ("角色属性" if Loc.current_lang == "zh" else "Character Stats")
+	stat_title.add_theme_font_size_override("font_size", 16)
+	stat_title.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	stat_root.add_child(stat_title)
+	
+	var stat_attack_lbl = Label.new()
+	var stat_def_lbl = Label.new()
+	var stat_hp_lbl = Label.new()
+	var stat_lvl_lbl = Label.new()
+	var stat_skill_lvl_lbl = Label.new()
+	var stat_unlocked_lbl = Label.new()
+	var stat_list = [stat_attack_lbl, stat_def_lbl, stat_hp_lbl, stat_lvl_lbl, stat_skill_lvl_lbl, stat_unlocked_lbl]
+	for l in stat_list:
+		l.add_theme_font_size_override("font_size", 13)
+		l.add_theme_color_override("font_color", Color(0.78, 0.84, 0.94))
+		stat_root.add_child(l)
+	
+	var right_col = PanelContainer.new()
+	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_col.size_flags_stretch_ratio = 2.0
+	right_col.add_theme_stylebox_override("panel", make_island_style.call(Color(0.11, 0.10, 0.15, 0.95), Color(0.52, 0.40, 0.22)))
+	product_row.add_child(right_col)
+	
+	var right_margin = MarginContainer.new()
+	right_margin.add_theme_constant_override("margin_left", 10)
+	right_margin.add_theme_constant_override("margin_right", 10)
+	right_margin.add_theme_constant_override("margin_top", 10)
+	right_margin.add_theme_constant_override("margin_bottom", 10)
+	right_col.add_child(right_margin)
+	
+	var shop_root = VBoxContainer.new()
+	shop_root.add_theme_constant_override("separation", 8)
+	shop_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	shop_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_margin.add_child(shop_root)
+	
+	var shop_title = Label.new()
+	shop_title.text = ("商店页面" if Loc.current_lang == "zh" else "Shop")
+	shop_title.add_theme_font_size_override("font_size", 16)
+	shop_title.add_theme_color_override("font_color", Color(1.0, 0.87, 0.55))
+	shop_root.add_child(shop_title)
+	
+	var offers_grid = HBoxContainer.new()
+	offers_grid.add_theme_constant_override("separation", 10)
+	offers_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	offers_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	shop_root.add_child(offers_grid)
+	
+	# Shop cards: 2 columns x 3 rows.
 	var shop_columns: Array = []
-	for i in range(3):
+	for i in range(2):
 		var col = VBoxContainer.new()
 		col.add_theme_constant_override("separation", 8)
-		col.custom_minimum_size = Vector2(col_width, 0)
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		product_row.add_child(col)
+		col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		offers_grid.add_child(col)
 		shop_columns.append(col)
 	
-	# Make 3 rows fit without scrolling.
-	var card_height = clampf((panel_size.y - 250.0) / 3.0, 90.0, 118.0)
-	var card_desc_height = max(30.0, card_height - 76.0)
+	var card_height = clampf((panel_size.y - 340.0) / 3.0, 56.0, 104.0)
+	var card_desc_height = max(18.0, card_height - 70.0)
 	
 	# Right-side description panel removed by request.
 	# Keep a no-op binder so existing product creation code stays simple.
@@ -1716,18 +2128,40 @@ func _open_shop():
 
 	var offer_buttons: Array = []
 	var offer_cards: Array = []
-	var reroll_cost: int = 10
+	var reroll_cost: int = 50
+	var reroll_count: int = 0
+	var reroll_max: int = 1
 	
 	var refresh_shop_state: Callable
 	refresh_shop_state = func():
 		gold_lbl.text = (("金币: %d" if Loc.current_lang == "zh" else "Gold: %d") % GameState.player_gold)
-		reroll_btn.text = (("刷新商品 (%dG)" if Loc.current_lang == "zh" else "Refresh (%dG)") % reroll_cost)
-		reroll_btn.disabled = GameState.player_gold < reroll_cost
+		reroll_btn.text = (("刷新商品 %d/%d (%dG)" % [reroll_count, reroll_max, reroll_cost]) if Loc.current_lang == "zh" else ("Refresh %d/%d (%dG)" % [reroll_count, reroll_max, reroll_cost]))
+		reroll_btn.disabled = GameState.player_gold < reroll_cost or reroll_count >= reroll_max
+		
+		# Left-column character stats
+		var atk_now = int((3.0 + float(bonus_attack_points) + float(current_dice_bonus) / 4.0) * _get_damage_multiplier())
+		stat_attack_lbl.text = (("攻击: %d（成长+%d）" % [atk_now, bonus_attack_points]) if Loc.current_lang == "zh" else ("Attack: %d (growth +%d)" % [atk_now, bonus_attack_points]))
+		stat_def_lbl.text = (("防御(护甲): %d（成长+%d）" % [GameState.player_armor, bonus_armor_points]) if Loc.current_lang == "zh" else ("Defense (Armor): %d (growth +%d)" % [GameState.player_armor, bonus_armor_points]))
+		stat_hp_lbl.text = (("血量: %d/%d" % [GameState.player_hp, GameState.player_max_hp]) if Loc.current_lang == "zh" else ("HP: %d/%d" % [GameState.player_hp, GameState.player_max_hp]))
+		stat_lvl_lbl.text = (("当前波次: %d" % current_wave) if Loc.current_lang == "zh" else ("Current Wave: %d" % current_wave))
+		stat_skill_lvl_lbl.text = (("普通攻击等级: Lv%d（%d目标）" % [auto_attack_targets, auto_attack_targets]) if Loc.current_lang == "zh" else ("Auto Attack Level: Lv%d (%d targets)" % [auto_attack_targets, auto_attack_targets]))
+		stat_unlocked_lbl.text = (("已解锁技能数: %d" % max(0, unlocked_attacks.size() - 1)) if Loc.current_lang == "zh" else ("Unlocked Skills: %d" % max(0, unlocked_attacks.size() - 1)))
+		
 		for it in offer_buttons:
 			var b = it["btn"] as Button
-			if not is_instance_valid(b) or b.disabled:
+			if not is_instance_valid(b):
 				continue
 			var cost = int(it["cost"])
+			if it.has("cost_fn"):
+				var fn = it["cost_fn"] as Callable
+				if fn.is_valid():
+					cost = int(fn.call())
+			if it.has("cost_lbl"):
+				var c_lbl = it["cost_lbl"] as Label
+				if is_instance_valid(c_lbl):
+					c_lbl.text = "%dG" % cost
+			if b.disabled:
+				continue
 			b.modulate = Color(1, 1, 1, 1) if GameState.player_gold >= cost else Color(0.62, 0.56, 0.56, 1)
 	
 	var clear_cards = func():
@@ -1737,14 +2171,42 @@ func _open_shop():
 		offer_cards.clear()
 		offer_buttons.clear()
 	
+	var clear_rare_cards = func():
+		var keep_cards: Array = []
+		var keep_card_ids: Dictionary = {}
+		for c in offer_cards:
+			if not is_instance_valid(c):
+				continue
+			var is_fixed = bool(c.get_meta("is_fixed_offer")) if c.has_meta("is_fixed_offer") else false
+			var row = int(c.get_meta("shop_row")) if c.has_meta("shop_row") else 0
+			var keep = is_fixed
+			if not keep and row == 3 and c.has_meta("buy_btn"):
+				var bb = c.get_meta("buy_btn") as Button
+				if is_instance_valid(bb) and bb.disabled:
+					keep = true
+			if keep:
+				keep_cards.append(c)
+				keep_card_ids[c.get_instance_id()] = true
+			else:
+				c.queue_free()
+		
+		var keep_buttons: Array = []
+		for it in offer_buttons:
+			var card_ref = it.get("card") as Control
+			if is_instance_valid(card_ref) and keep_card_ids.has(card_ref.get_instance_id()):
+				keep_buttons.append(it)
+		offer_cards = keep_cards
+		offer_buttons = keep_buttons
+	
 	var make_offer_card: Callable
 	make_offer_card = func(entry: Dictionary):
 		var card = PanelContainer.new()
 		card.custom_minimum_size = Vector2(0, card_height)
+		card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		
 		var sb = StyleBoxFlat.new()
 		sb.bg_color = Color(0.12, 0.13, 0.17, 0.96)
-		sb.border_color = rarity_color.call(str(entry.get("rarity", "common")))
+		sb.border_color = rarity_color.call(str(entry.get("rarity", "common"))) if entry.has("rarity") else Color(0.55, 0.55, 0.55)
 		sb.set_border_width_all(2)
 		sb.corner_radius_top_left = 8
 		sb.corner_radius_top_right = 8
@@ -1771,13 +2233,18 @@ func _open_shop():
 		name_lbl.add_theme_font_size_override("font_size", 14)
 		name_lbl.add_theme_color_override("font_color", Color(0.97, 0.95, 0.9))
 		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		name_lbl.clip_text = true
+		name_lbl.max_lines_visible = 1
+		name_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		top.add_child(name_lbl)
 		
-		var rarity_lbl = Label.new()
-		rarity_lbl.text = "[%s]" % rarity_label.call(str(entry.get("rarity", "common")))
-		rarity_lbl.add_theme_font_size_override("font_size", 11)
-		rarity_lbl.add_theme_color_override("font_color", rarity_color.call(str(entry.get("rarity", "common"))))
-		top.add_child(rarity_lbl)
+		if entry.has("rarity"):
+			var rarity_lbl = Label.new()
+			rarity_lbl.text = "[%s]" % rarity_label.call(str(entry.get("rarity", "common")))
+			rarity_lbl.add_theme_font_size_override("font_size", 11)
+			rarity_lbl.add_theme_color_override("font_color", rarity_color.call(str(entry.get("rarity", "common"))))
+			top.add_child(rarity_lbl)
 		
 		var desc_lbl = Label.new()
 		desc_lbl.text = str(entry.get("desc", ""))
@@ -1785,14 +2252,31 @@ func _open_shop():
 		desc_lbl.add_theme_font_size_override("font_size", 12)
 		desc_lbl.add_theme_color_override("font_color", Color(0.78, 0.84, 0.94))
 		desc_lbl.custom_minimum_size = Vector2(0, card_desc_height)
+		desc_lbl.max_lines_visible = 2
+		desc_lbl.clip_text = true
+		desc_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		vb.add_child(desc_lbl)
 		
 		var bottom = HBoxContainer.new()
 		vb.add_child(bottom)
 		
-		var cost: int = int(entry.get("cost", 0))
+		var static_cost: int = int(entry.get("cost", 0))
+		var kind = str(entry.get("kind", ""))
+		var get_cost = func() -> int:
+			match kind:
+				"heal":
+					return _shop_heal_cost()
+				"upgrade_attack":
+					return _shop_upgrade_attack_cost()
+				"attack_point":
+					return _shop_attack_point_cost()
+				"armor_point":
+					return _shop_armor_point_cost()
+				_:
+					return static_cost
+		
 		var cost_lbl = Label.new()
-		cost_lbl.text = "%dG" % cost
+		cost_lbl.text = "%dG" % get_cost.call()
 		cost_lbl.add_theme_font_size_override("font_size", 13)
 		cost_lbl.add_theme_color_override("font_color", Color(1, 0.84, 0.2))
 		cost_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1803,19 +2287,39 @@ func _open_shop():
 		buy_btn.custom_minimum_size = Vector2(68, 28)
 		buy_btn.add_theme_font_size_override("font_size", 12)
 		bottom.add_child(buy_btn)
+		if bool(entry.get("disabled", false)):
+			buy_btn.disabled = true
+			buy_btn.text = str(entry.get("disabled_text", ("已满级" if Loc.current_lang == "zh" else "MAX")))
+			card.modulate = Color(0.82, 0.82, 0.82, 0.95)
 		
-		var kind = str(entry.get("kind", ""))
 		buy_btn.pressed.connect(func():
 			if buy_btn.disabled:
 				return
-			if GameState.player_gold < cost:
+			var pay_cost: int = get_cost.call()
+			if GameState.player_gold < pay_cost:
 				return
-			
-			if kind == "upgrade" and card_slots.is_empty():
-				add_log("[color=gray]没有可升级卡牌[/color]" if Loc.current_lang == "zh" else "[color=gray]No cards to upgrade[/color]")
+			if kind == "heal" and shop_heal_bought_this_shop:
+				add_log("[color=gray]本回合已购买恢复[/color]")
 				return
+			if kind == "upgrade_attack" and shop_upgrade_bought_this_shop:
+				add_log("[color=gray]本回合已购买升级攻击[/color]")
+				return
+			if kind == "attack_point" and shop_attack_point_bought_this_shop:
+				add_log("[color=gray]本回合已购买攻击点[/color]")
+				return
+			if kind == "armor_point" and shop_armor_point_bought_this_shop:
+				add_log("[color=gray]本回合已购买护甲点[/color]")
+				return
+			if kind == "upgrade_attack" and auto_attack_targets >= 5:
+				add_log("[color=gray]攻击已满级 Lv5[/color]")
+				return
+			if kind == "attack":
+				var atk_id_chk = str(entry.get("id", ""))
+				if attack_levels.get(atk_id_chk, 0) >= 3:
+					add_log("[color=gray]技能已满级 Lv3[/color]")
+					return
 			
-			GameState.player_gold -= cost
+			GameState.player_gold -= pay_cost
 			match kind:
 				"card":
 					GameState.add_card_to_deck(str(entry.get("id", "")))
@@ -1826,27 +2330,56 @@ func _open_shop():
 						unlocked_attacks.append(atk_id)
 						attack_levels[atk_id] = 1
 					else:
-						attack_levels[atk_id] = attack_levels.get(atk_id, 1) + 1
+						attack_levels[atk_id] = min(attack_levels.get(atk_id, 1) + 1, 3)
 					SFX.play("powerup")
-				"upgrade":
-					var to_upgrade = card_slots[randi() % card_slots.size()]
-					GameState.upgrade_card(to_upgrade)
-					SFX.play("upgrade")
+				"upgrade_attack":
+					auto_attack_targets = min(auto_attack_targets + 1, 5)
+					shop_upgrade_buy_count += 1
+					shop_upgrade_bought_this_shop = true
+					add_log("[color=cyan]⬆ 攻击升级至 Lv%d，同时攻击 %d 个目标[/color]" % [auto_attack_targets, auto_attack_targets])
+					SFX.play("powerup")
+				"attack_point":
+					bonus_attack_points += 1
+					shop_attack_point_buy_count += 1
+					shop_attack_point_bought_this_shop = true
+					add_log("[color=orange]⚔ 攻击点 +1（当前 +%d）[/color]" % bonus_attack_points)
+					SFX.play("powerup")
+				"armor_point":
+					bonus_armor_points += 2
+					shop_armor_point_buy_count += 1
+					shop_armor_point_bought_this_shop = true
+					GameState.add_armor(2)
+					add_log("[color=deepskyblue]🛡 护甲点 +2（当前 +%d）[/color]" % bonus_armor_points)
+					SFX.play("powerup")
 				"heal":
+					shop_heal_buy_count += 1
+					shop_heal_bought_this_shop = true
 					GameState.heal(GameState.player_max_hp * 3 / 10)
 					if is_instance_valid(player):
 						player.update_hp_bar(GameState.player_hp, GameState.player_max_hp)
 					SFX.play("heal")
 			
-			buy_btn.disabled = true
-			buy_btn.text = ("已购✓" if Loc.current_lang == "zh" else "Bought✓")
-			card.modulate = Color(0.82, 0.82, 0.82, 0.95)
+			var fixed_once = kind in ["heal", "upgrade_attack", "attack_point", "armor_point"]
+			if fixed_once:
+				buy_btn.disabled = true
+				buy_btn.text = ("已满级" if kind == "upgrade_attack" and auto_attack_targets >= 5 else "已购✓") if Loc.current_lang == "zh" else ("MAX" if kind == "upgrade_attack" and auto_attack_targets >= 5 else "Bought✓")
+				card.modulate = Color(0.82, 0.82, 0.82, 0.95)
+			elif kind == "attack":
+				buy_btn.disabled = true
+				buy_btn.text = ("已购✓" if Loc.current_lang == "zh" else "Bought✓")
+				card.modulate = Color(0.82, 0.82, 0.82, 0.95)
 			refresh_shop_state.call()
 		)
 		
-		offer_buttons.append({"btn": buy_btn, "cost": cost})
+		card.set_meta("shop_row", int(entry.get("shop_row", 0)))
+		card.set_meta("is_fixed_offer", bool(entry.get("fixed", false)))
+		card.set_meta("item_id", str(entry.get("id", "")))
+		card.set_meta("item_kind", kind)
+		card.set_meta("buy_btn", buy_btn)
+		offer_buttons.append({"btn": buy_btn, "cost": static_cost, "cost_fn": get_cost, "cost_lbl": cost_lbl, "card": card})
 		bind_detail.call(card, str(entry.get("title", "")), str(entry.get("detail", entry.get("desc", ""))))
-		var col_idx = min(int(offer_cards.size() / 3), shop_columns.size() - 1)
+		var col_idx: int = int(entry.get("col", 0))
+		col_idx = clampi(col_idx, 0, shop_columns.size() - 1)
 		var target_col = shop_columns[col_idx] as VBoxContainer
 		if target_col:
 			target_col.add_child(card)
@@ -1857,138 +2390,182 @@ func _open_shop():
 	var attack_pool = [
 		{"id":"orbit_blades", "name_zh":"旋转刀刃", "name_en":"Orbit Blades", "cost":20, "desc_zh":"召唤环绕飞刃持续切割附近敌人。", "desc_en":"Summons orbiting blades that repeatedly cut nearby enemies."},
 		{"id":"chain_lightning_passive", "name_zh":"连锁闪电", "name_en":"Chain Lightning", "cost":25, "desc_zh":"周期性释放闪电，自动跳跃打击多个目标。", "desc_en":"Periodically casts lightning that chains across multiple enemies."},
-		{"id":"flame_tornado", "name_zh":"火焰旋风", "name_en":"Flame Tornado", "cost":30, "desc_zh":"在角色周围生成火焰旋风，持续造成范围伤害。", "desc_en":"Creates a fiery tornado around you for continuous AoE damage."},
-		{"id":"ice_nova", "name_zh":"冰霜新星", "name_en":"Ice Nova", "cost":25, "desc_zh":"爆发寒冰冲击，冻结并伤害周围敌人。", "desc_en":"Unleashes an icy nova that damages and freezes nearby foes."},
-		{"id":"poison_cloud", "name_zh":"毒雾", "name_en":"Poison Cloud", "cost":20, "desc_zh":"生成持续毒雾，对接近敌人叠加中毒。", "desc_en":"Creates a poison cloud that damages and poisons nearby enemies."},
+		{"id":"flame_tornado", "name_zh":"火焰旋风", "name_en":"Flame Tornado", "cost":30, "desc_zh":"新星形火焰脉冲，对范围敌人施加持续灼烧。", "desc_en":"Nova-shaped flame pulse that applies sustained burn to enemies."},
+		{"id":"ice_nova", "name_zh":"冰霜新星", "name_en":"Ice Nova", "cost":25, "desc_zh":"无伤害控制：Lv1减速，Lv2定身1秒，Lv3定身3秒。", "desc_en":"No-damage control: Lv1 slow, Lv2 root 1s, Lv3 root 3s."},
+		{"id":"poison_cloud", "name_zh":"毒雾", "name_en":"Poison Cloud", "cost":20, "desc_zh":"新星形毒雾脉冲，对范围敌人施加持续中毒。", "desc_en":"Nova-shaped toxic pulse that applies sustained poison to enemies."},
 		{"id":"holy_cross", "name_zh":"圣光十字", "name_en":"Holy Cross", "cost":25, "desc_zh":"向多个方向发射穿透弹幕。", "desc_en":"Fires piercing projectiles in multiple directions."},
 		{"id":"meteor_rain", "name_zh":"陨石雨", "name_en":"Meteor Rain", "cost":35, "desc_zh":"召唤多发陨石，对大范围造成高爆发伤害。", "desc_en":"Calls down multiple meteors for high burst AoE damage."},
-		{"id":"spirit_sword", "name_zh":"灵魂飞剑", "name_en":"Spirit Sword", "cost":30, "desc_zh":"释放追踪飞剑，自动锁定并穿刺敌人。", "desc_en":"Summons homing spirit swords that seek and strike enemies."},
-		{"id":"earthquake", "name_zh":"地震", "name_en":"Earthquake", "cost":30, "desc_zh":"触发地震冲击波，击退并重创近身敌群。", "desc_en":"Triggers a quake shockwave that knocks back and damages crowds."},
+		{"id":"spirit_sword", "name_zh":"灵魂飞剑", "name_en":"Spirit Sword", "cost":30, "desc_zh":"释放追踪飞剑；Lv1不弹射，Lv2弹1次，Lv3+弹3次。", "desc_en":"Summons homing spirit swords; Lv1 no ricochet, Lv2 one bounce, Lv3+ three bounces."},
+		{"id":"earthquake", "name_zh":"地震", "name_en":"Earthquake", "cost":30, "desc_zh":"低伤害地震波并击退；Lv1/2/3范围递增，Lv3先击退后眩晕。", "desc_en":"Lower-damage quake knockback; range grows at Lv1/2/3, Lv3 knocks back first then stuns."},
 		{"id":"vampiric_aura", "name_zh":"吸血光环", "name_en":"Vampiric Aura", "cost":25, "desc_zh":"持续吸取附近敌人生命并为你恢复血量。", "desc_en":"Drains nearby enemies over time and heals you."},
 	]
+	
+	var make_attack_entry = func(atk: Dictionary, target_rarity: String, col: int, shop_row: int = 3):
+		var atk_id = str(atk["id"])
+		var base_cost = int(atk["cost"])
+		var lvl = attack_levels.get(atk_id, 0)
+		var target_lvl = min(lvl + 1, 3)
+		var price_mul = 1.7
+		if target_lvl == 2:
+			price_mul = 2.4
+		elif target_lvl >= 3:
+			price_mul = 3.2
+		var final_cost = int(round(base_cost * price_mul))
+		
+		var name = str(atk["name_zh"]) if Loc.current_lang == "zh" else str(atk["name_en"])
+		if lvl <= 0:
+			name = "%s Lv1" % name
+		elif lvl < 3:
+			name = "%s Lv%d→%d" % [name, lvl, lvl + 1]
+		else:
+			name = "%s Lv3(MAX)" % name
+		
+		var detail_zh = "%s\n价格：Lv1 %.1fx / Lv2 %.1fx / Lv3 %.1fx" % [str(atk["desc_zh"]), 1.7, 2.4, 3.2]
+		var detail_en = "%s\nPrice: Lv1 x%.1f / Lv2 x%.1f / Lv3 x%.1f" % [str(atk["desc_en"]), 1.7, 2.4, 3.2]
+		make_offer_card.call({
+			"kind": "attack",
+			"id": atk_id,
+			"title": name,
+			"desc": str(atk["desc_zh"]) if Loc.current_lang == "zh" else str(atk["desc_en"]),
+			"detail": detail_zh if Loc.current_lang == "zh" else detail_en,
+			"cost": final_cost,
+			"rarity": target_rarity,
+			"col": col,
+			"shop_row": shop_row,
+			"disabled": lvl >= 3,
+		})
+	
+	var build_rare_offers: Callable
+	build_rare_offers = func():
+		clear_rare_cards.call()
+		var attack_map: Dictionary = {}
+		for atk in attack_pool:
+			attack_map[str(atk["id"])] = atk
+		
+		var row3_pool_ids = [
+			"orbit_blades", "chain_lightning_passive", "flame_tornado", "ice_nova", "poison_cloud",
+			"holy_cross", "meteor_rain", "spirit_sword", "earthquake", "vampiric_aura"
+		]
+		var selectable_ids: Array = []
+		for id in row3_pool_ids:
+			if attack_levels.get(id, 0) < 3:
+				selectable_ids.append(id)
+		if selectable_ids.is_empty():
+			selectable_ids = row3_pool_ids.duplicate()
+		selectable_ids.shuffle()
+		
+		var used_ids: Dictionary = {}
+		var occupied_cols: Dictionary = {}
+		for c in offer_cards:
+			if not is_instance_valid(c):
+				continue
+			var row = int(c.get_meta("shop_row")) if c.has_meta("shop_row") else 0
+			if row != 3:
+				continue
+			var col_idx_exist = c.get_parent().get_index() if is_instance_valid(c.get_parent()) else -1
+			if col_idx_exist >= 0:
+				occupied_cols[col_idx_exist] = true
+			if c.has_meta("item_id"):
+				used_ids[str(c.get_meta("item_id"))] = true
+		
+		for col in range(2):
+			if occupied_cols.has(col):
+				continue
+			var pick_id = ""
+			for id in selectable_ids:
+				if not used_ids.has(id):
+					pick_id = id
+					used_ids[id] = true
+					break
+			# Fallback: if all choices are already used by kept purchased items,
+			# allow duplicate display instead of leaving an empty rare slot.
+			if pick_id == "" and not selectable_ids.is_empty():
+				pick_id = str(selectable_ids[randi() % selectable_ids.size()])
+			if pick_id != "" and attack_map.has(pick_id):
+				make_attack_entry.call(attack_map[pick_id], "rare", col, 3)
+		
+		refresh_shop_state.call()
 	
 	var build_offers: Callable
 	build_offers = func():
 		clear_cards.call()
 		
-		# Keep each column color-consistent: Common / Uncommon / Rare
-		var common_offers: Array = []
-		var uncommon_offers: Array = []
-		var rare_offers: Array = []
-		
-		var push_offer = func(entry: Dictionary):
-			var rar = str(entry.get("rarity", "common"))
-			match rar:
-				"rare":
-					rare_offers.append(entry)
-				"uncommon":
-					uncommon_offers.append(entry)
-				_:
-					common_offers.append(entry)
-		
-		var card_ids: Array = GameData.CARDS.keys()
-		card_ids.shuffle()
-		var card_pick_idx: int = 0
-		var add_card_offer = func(target_rarity: String):
-			if card_ids.is_empty():
-				return
-			if card_pick_idx >= card_ids.size():
-				card_ids.shuffle()
-				card_pick_idx = 0
-			var card_id: String = card_ids[card_pick_idx]
-			card_pick_idx += 1
-			var def = GameData.CARDS.get(card_id)
-			if not def:
-				return
-			var base_cost = 10 + def.energy_cost * 5
-			var final_cost = int(round(base_cost * float(rarity_mul.call(target_rarity))))
-			push_offer.call({
-				"kind": "card",
-				"id": card_id,
-				"title": _card_name(card_id, def),
-				"desc": _card_desc(card_id, def),
-				"detail": (("加入卡组。效果：" if Loc.current_lang == "zh" else "Adds to deck. Effect: ") + _card_desc(card_id, def)),
-				"cost": final_cost,
-				"rarity": target_rarity,
-			})
-		
-		var atk_pool: Array = attack_pool.duplicate()
-		atk_pool.shuffle()
-		var atk_pick_idx: int = 0
-		var add_attack_offer = func(target_rarity: String):
-			if atk_pool.is_empty():
-				return
-			if atk_pick_idx >= atk_pool.size():
-				atk_pool.shuffle()
-				atk_pick_idx = 0
-			var atk = atk_pool[atk_pick_idx]
-			atk_pick_idx += 1
-			var atk_id = str(atk["id"])
-			var base_cost = int(atk["cost"])
-			var final_cost = int(round(base_cost * float(rarity_mul.call(target_rarity))))
-			var lvl = attack_levels.get(atk_id, 0)
-			var is_new = not unlocked_attacks.has(atk_id)
-			var name = str(atk["name_zh"]) if Loc.current_lang == "zh" else str(atk["name_en"])
-			if not is_new:
-				name = "%s Lv%d→%d" % [name, lvl, lvl + 1]
-			push_offer.call({
-				"kind": "attack",
-				"id": atk_id,
-				"title": name,
-				"desc": str(atk["desc_zh"]) if Loc.current_lang == "zh" else str(atk["desc_en"]),
-				"detail": str(atk["desc_zh"]) if Loc.current_lang == "zh" else str(atk["desc_en"]),
-				"cost": final_cost,
-				"rarity": target_rarity,
-			})
-		
-		# Fixed utility cards by rarity
-		push_offer.call({
+		# Row1 fixed slots (common)
+		make_offer_card.call({
 			"kind": "heal",
 			"title": ("恢复30%生命" if Loc.current_lang == "zh" else "Heal 30% HP"),
 			"desc": ("立即恢复最大生命值的 30%。" if Loc.current_lang == "zh" else "Instantly restore 30% max HP."),
 			"detail": ("立即恢复最大生命值的 30%，适合为下一波保命。" if Loc.current_lang == "zh" else "Instantly restores 30% max HP to survive upcoming waves."),
-			"cost": 10,
-			"rarity": "common",
+			"cost": _shop_heal_cost(),
+			"col": 0,
+			"shop_row": 1,
+			"fixed": true,
+			"disabled": shop_heal_bought_this_shop,
+			"disabled_text": ("已购✓" if Loc.current_lang == "zh" else "Bought✓"),
 		})
-		push_offer.call({
-			"kind": "upgrade",
-			"title": ("升级卡牌" if Loc.current_lang == "zh" else "Upgrade Card"),
-			"desc": ("随机升级一张装备栏卡牌。" if Loc.current_lang == "zh" else "Randomly upgrades one equipped card."),
-			"detail": ("随机升级你当前装备栏中的一张卡牌，提升其强度。" if Loc.current_lang == "zh" else "Randomly upgrades one equipped card and improves its effectiveness."),
-			"cost": 15,
-			"rarity": "uncommon",
+		if auto_attack_targets < 5:
+			make_offer_card.call({
+				"kind": "upgrade_attack",
+				"title": (("升级攻击 (Lv%d→%d)" % [auto_attack_targets, auto_attack_targets + 1]) if Loc.current_lang == "zh" else ("Upgrade Attack (Lv%d→%d)" % [auto_attack_targets, auto_attack_targets + 1])),
+				"desc": (("提升普通攻击目标数 +1（当前 %d 个）。" % auto_attack_targets) if Loc.current_lang == "zh" else ("Increase auto-attack targets by 1 (current: %d)." % auto_attack_targets)),
+				"detail": (("每次普通攻击可同时命中更多敌人。当前 Lv%d，升级后 Lv%d。上限 Lv5。" % [auto_attack_targets, auto_attack_targets + 1]) if Loc.current_lang == "zh" else ("Auto-attack hits more enemies simultaneously. Current Lv%d, next Lv%d. Max Lv5." % [auto_attack_targets, auto_attack_targets + 1])),
+				"cost": _shop_upgrade_attack_cost(),
+				"col": 1,
+				"shop_row": 1,
+				"fixed": true,
+				"disabled": shop_upgrade_bought_this_shop,
+				"disabled_text": ("已购✓" if Loc.current_lang == "zh" else "Bought✓"),
+			})
+		else:
+			make_offer_card.call({
+				"kind": "upgrade_attack",
+				"title": ("升级攻击 (MAX)" if Loc.current_lang == "zh" else "Upgrade Attack (MAX)"),
+				"desc": ("已达到上限（Lv5）。" if Loc.current_lang == "zh" else "Reached cap (Lv5)."),
+				"detail": ("升级攻击已达到最高等级，无法继续购买。" if Loc.current_lang == "zh" else "Upgrade attack reached max level and cannot be purchased further."),
+				"cost": _shop_upgrade_attack_cost(),
+				"col": 1,
+				"shop_row": 1,
+				"fixed": true,
+				"disabled": true,
+				"disabled_text": (("已购✓" if shop_upgrade_bought_this_shop else "已满级") if Loc.current_lang == "zh" else ("Bought✓" if shop_upgrade_bought_this_shop else "MAX")),
+			})
+		
+		# Row2 fixed slots (uncommon): attack/armor points, not refreshed
+		make_offer_card.call({
+			"kind": "attack_point",
+			"title": ("攻击点" if Loc.current_lang == "zh" else "Attack Point"),
+			"desc": ("永久攻击 +1。" if Loc.current_lang == "zh" else "Permanent +1 attack."),
+			"detail": ("提升主角基础攻击点。" if Loc.current_lang == "zh" else "Increase hero base attack point."),
+			"cost": _shop_attack_point_cost(),
+			"col": 0,
+			"shop_row": 2,
+			"fixed": true,
+			"disabled": shop_attack_point_bought_this_shop,
+			"disabled_text": ("已购✓" if Loc.current_lang == "zh" else "Bought✓"),
+		})
+		make_offer_card.call({
+			"kind": "armor_point",
+			"title": ("护甲点" if Loc.current_lang == "zh" else "Armor Point"),
+			"desc": ("永久护甲 +2。" if Loc.current_lang == "zh" else "Permanent +2 armor."),
+			"detail": ("每波开始获得额外护甲，并立即获得 +2 护甲。" if Loc.current_lang == "zh" else "Gain extra armor each wave and instantly +2 armor now."),
+			"cost": _shop_armor_point_cost(),
+			"col": 1,
+			"shop_row": 2,
+			"fixed": true,
+			"disabled": shop_armor_point_bought_this_shop,
+			"disabled_text": ("已购✓" if Loc.current_lang == "zh" else "Bought✓"),
 		})
 		
-		# Build offers so each rarity column has exactly 3 cards
-		add_card_offer.call("common")
-		add_attack_offer.call("common")
-		add_card_offer.call("uncommon")
-		add_attack_offer.call("uncommon")
-		add_card_offer.call("rare")
-		add_attack_offer.call("rare")
-		
-		while common_offers.size() < 3:
-			add_card_offer.call("common")
-		while uncommon_offers.size() < 3:
-			add_card_offer.call("uncommon")
-		while rare_offers.size() < 3:
-			add_card_offer.call("rare")
-		
-		for i in range(min(3, common_offers.size())):
-			make_offer_card.call(common_offers[i])
-		for i in range(min(3, uncommon_offers.size())):
-			make_offer_card.call(uncommon_offers[i])
-		for i in range(min(3, rare_offers.size())):
-			make_offer_card.call(rare_offers[i])
-		
-		refresh_shop_state.call()
+		# Row3 rare only (reroll affects this row only)
+		build_rare_offers.call()
 	
 	reroll_btn.pressed.connect(func():
-		if GameState.player_gold < reroll_cost:
+		if GameState.player_gold < reroll_cost or reroll_count >= reroll_max:
 			return
 		GameState.player_gold -= reroll_cost
+		reroll_count += 1
 		SFX.play("dice_roll")
-		build_offers.call()
+		build_rare_offers.call()
 	)
 	
 	# Footer
@@ -1999,7 +2576,7 @@ func _open_shop():
 	
 	var leave_btn = Button.new()
 	leave_btn.text = ("跳过购物" if Loc.current_lang == "zh" else "Skip Shop")
-	leave_btn.custom_minimum_size = Vector2(120, 40)
+	leave_btn.custom_minimum_size = Vector2(110, 36)
 	leave_btn.pressed.connect(func():
 		overlay.queue_free()
 		GameState.combo_count = 0
@@ -2013,7 +2590,7 @@ func _open_shop():
 	
 	var continue_btn = Button.new()
 	continue_btn.text = ("完成购买，进入下一波" if Loc.current_lang == "zh" else "Start Next Wave")
-	continue_btn.custom_minimum_size = Vector2(210, 44)
+	continue_btn.custom_minimum_size = Vector2(180, 38)
 	continue_btn.add_theme_font_size_override("font_size", 16)
 	continue_btn.pressed.connect(func():
 		overlay.queue_free()
@@ -2273,10 +2850,16 @@ func _resume_game():
 
 func _update_hud():
 	if wave_label:
-		wave_label.text = Loc.tf("wave", [current_wave]) if Loc.has_key("wave") else "Wave %d" % current_wave
+		if is_skill_test_mode:
+			wave_label.text = ("技能测试场" if Loc.current_lang == "zh" else "Skill Test Arena")
+		else:
+			wave_label.text = Loc.tf("wave", [current_wave]) if Loc.has_key("wave") else "Wave %d" % current_wave
 	if timer_label:
-		var secs = max(0, int(wave_timer))
-		timer_label.text = "%d:%02d" % [secs / 60, secs % 60]
+		if is_skill_test_mode:
+			timer_label.text = ("TEST" if Loc.current_lang == "zh" else "TEST")
+		else:
+			var secs = max(0, int(wave_timer))
+			timer_label.text = "%d:%02d" % [secs / 60, secs % 60]
 	if hp_label:
 		var hp_text = "HP: %d/%d" % [GameState.player_hp, GameState.player_max_hp]
 		var armor_text = ("护甲" if Loc.current_lang == "zh" else "Armor") + ": %d" % GameState.player_armor

@@ -19,6 +19,8 @@ var max_floors: int = 10
 
 # Run mode: "adventure" or "survivor"
 var run_mode: String = "adventure"
+# Survivor difficulty: "normal" | "hard"
+var survivor_difficulty: String = "normal"
 
 # Deck management
 var deck: Array[String] = []  # Card IDs in draw pile
@@ -104,6 +106,7 @@ func reset_run():
 	player_armor = 0
 	player_gold = 0
 	current_floor = 1
+	survivor_difficulty = "normal"
 	poison_stacks = 0
 	freeze_turns = 0
 	regen_turns = 0

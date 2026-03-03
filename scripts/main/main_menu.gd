@@ -125,7 +125,7 @@ func _update_texts():
 	subtitle_label.text = Loc.t("subtitle")
 	desc_label.text = Loc.t("desc")
 	start_btn.text = Loc.t("begin")
-	survivor_btn.text = Loc.t("survivor_mode") if Loc.has_key("survivor_mode") else "Survivor Mode"
+	survivor_btn.text = ("冒险模式" if Loc.current_lang == "zh" else "Adventure Mode")
 	settings_btn.text = Loc.t("settings")
 	quit_btn.text = Loc.t("quit")
 	version_label.text = Loc.t("version")
@@ -151,18 +151,86 @@ func _update_display_buttons():
 	windowed_btn.disabled = not is_fs
 
 func _on_start():
+	_show_survivor_difficulty_picker()
+
+func _start_survivor_with_difficulty(diff: String):
 	await VFX.fade_out(0.4)
 	SaveManager.delete_run_save()  # New run discards old save
 	GameState.reset_run()
-	GameState.run_mode = "adventure"
-	get_tree().change_scene_to_file("res://scenes/map/map_screen.tscn")
+	GameState.run_mode = "survivor"
+	GameState.survivor_difficulty = diff
+	get_tree().change_scene_to_file("res://scenes/battle/survivor_arena.tscn")
+
+func _show_survivor_difficulty_picker():
+	if has_node("DifficultyOverlay"):
+		return
+	var overlay = ColorRect.new()
+	overlay.name = "DifficultyOverlay"
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0, 0, 0, 0.55)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(overlay)
+	
+	var panel = PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.custom_minimum_size = Vector2(360, 220)
+	panel.position = Vector2(-180, -110)
+	overlay.add_child(panel)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	panel.add_child(margin)
+	
+	var vb = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	margin.add_child(vb)
+	
+	var title = Label.new()
+	title.text = ("选择模式难度" if Loc.current_lang == "zh" else "Choose Difficulty")
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 20)
+	vb.add_child(title)
+	
+	var hint = Label.new()
+	hint.text = ("默认：普通模式" if Loc.current_lang == "zh" else "Default: Normal")
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 13)
+	hint.add_theme_color_override("font_color", Color(0.78, 0.82, 0.92))
+	vb.add_child(hint)
+	
+	var normal_btn = Button.new()
+	normal_btn.custom_minimum_size = Vector2(0, 42)
+	normal_btn.text = ("普通模式（默认）" if Loc.current_lang == "zh" else "Normal (Default)")
+	normal_btn.pressed.connect(func():
+		overlay.queue_free()
+		_start_survivor_with_difficulty("normal")
+	)
+	vb.add_child(normal_btn)
+	
+	var hard_btn = Button.new()
+	hard_btn.custom_minimum_size = Vector2(0, 42)
+	hard_btn.text = ("困难模式" if Loc.current_lang == "zh" else "Hard Mode")
+	hard_btn.pressed.connect(func():
+		overlay.queue_free()
+		_start_survivor_with_difficulty("hard")
+	)
+	vb.add_child(hard_btn)
+	
+	var cancel_btn = Button.new()
+	cancel_btn.custom_minimum_size = Vector2(0, 34)
+	cancel_btn.text = ("取消" if Loc.current_lang == "zh" else "Cancel")
+	cancel_btn.pressed.connect(func(): overlay.queue_free())
+	vb.add_child(cancel_btn)
 
 func _on_survivor():
 	await VFX.fade_out(0.4)
 	SaveManager.delete_run_save()
 	GameState.reset_run()
-	GameState.run_mode = "survivor"
-	get_tree().change_scene_to_file("res://scenes/battle/survivor_arena.tscn")
+	GameState.run_mode = "adventure"
+	get_tree().change_scene_to_file("res://scenes/map/map_screen.tscn")
 
 func _on_continue():
 	await VFX.fade_out(0.4)

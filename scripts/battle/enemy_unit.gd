@@ -27,6 +27,7 @@ var sprite
 var anim_sprite: AnimatedSprite2D = null
 var static_sprite: Sprite2D = null
 var hp_bar_fill: ColorRect
+var _status_fx_timer: float = 0.0
 var _anim_time: float = 0.0
 var _anim_seed: float = 0.0
 var _hit_squash_timer: float = 0.0
@@ -275,11 +276,13 @@ func _physics_process(delta):
 		freeze_timer -= delta
 		if sprite:
 			sprite.modulate = Color(0.5, 0.7, 1.0)
+		_update_status_visuals(delta)
 		_animate_visual(delta, Vector2.ZERO, false)
 		return
 	
 	# Status ticks
 	_tick_status(delta)
+	_update_status_visuals(delta)
 	
 	# Chase player
 	var dir = (target.global_position - global_position).normalized()
@@ -351,6 +354,50 @@ func _tick_status(delta):
 	if poison_stacks > 0:
 		take_damage(poison_stacks, Vector2.ZERO)
 		poison_stacks = max(0, poison_stacks - 1)
+
+func _update_status_visuals(delta: float):
+	_status_fx_timer = max(0.0, _status_fx_timer - delta)
+	
+	# Body tint feedback (no head icons)
+	if sprite and flash_timer <= 0 and freeze_timer <= 0:
+		var tint = Color.WHITE
+		if burn_stacks > 0:
+			tint = tint.lerp(Color(1.25, 0.78, 0.55, 1.0), 0.35)
+		if poison_stacks > 0:
+			tint = tint.lerp(Color(0.72, 1.18, 0.78, 1.0), 0.35)
+		if burn_stacks > 0 or poison_stacks > 0:
+			var pulse = 0.9 + 0.1 * sin(_anim_time * 11.0 + _anim_seed)
+			sprite.modulate = Color(tint.r * pulse, tint.g * pulse, tint.b * pulse, 1.0)
+	
+	if _status_fx_timer <= 0.0 and (burn_stacks > 0 or poison_stacks > 0):
+		if burn_stacks > 0:
+			for i in range(min(2, 1 + int(burn_stacks / 4))):
+				_spawn_status_particle("burn")
+		if poison_stacks > 0:
+			for i in range(min(2, 1 + int(poison_stacks / 4))):
+				_spawn_status_particle("poison")
+		_status_fx_timer = 0.12
+
+func _spawn_status_particle(kind: String):
+	var p = ColorRect.new()
+	p.z_index = 6
+	add_child(p)
+	var tw = p.create_tween()
+	
+	if kind == "burn":
+		p.size = Vector2(2.6, 3.4)
+		p.position = Vector2(randf_range(-6.0, 6.0), randf_range(-4.0, 4.0))
+		p.color = Color(1.0, randf_range(0.35, 0.7), 0.12, 0.85)
+		tw.tween_property(p, "position", p.position + Vector2(randf_range(-2.0, 2.0), randf_range(-9.0, -5.0)), 0.24)
+		tw.parallel().tween_property(p, "modulate:a", 0.0, 0.24)
+	else:
+		p.size = Vector2(3.0, 3.0)
+		p.position = Vector2(randf_range(-6.0, 6.0), randf_range(-2.0, 6.0))
+		p.color = Color(0.45, 1.0, 0.55, 0.78)
+		tw.tween_property(p, "position", p.position + Vector2(randf_range(-3.0, 3.0), randf_range(-5.0, -2.0)), 0.28)
+		tw.parallel().tween_property(p, "modulate:a", 0.0, 0.28)
+	
+	tw.tween_callback(p.queue_free)
 
 func take_damage(amount: int, knockback_dir: Vector2 = Vector2.ZERO):
 	hp -= amount

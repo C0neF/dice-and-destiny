@@ -53,6 +53,7 @@ func has_run_save() -> bool:
 func save_run():
 	var data = {
 		"run_mode": GameState.run_mode,
+		"survivor_difficulty": GameState.survivor_difficulty,
 		"player_hp": GameState.player_hp,
 		"player_max_hp": GameState.player_max_hp,
 		"player_energy": GameState.player_energy,
@@ -80,6 +81,7 @@ func load_run() -> bool:
 		return false
 	
 	GameState.run_mode = data.get("run_mode", "adventure")
+	GameState.survivor_difficulty = data.get("survivor_difficulty", "normal")
 	GameState.player_hp = int(data.get("player_hp", 50))
 	GameState.player_max_hp = int(data.get("player_max_hp", 50))
 	GameState.player_energy = int(data.get("player_energy", 3))
